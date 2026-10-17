@@ -4,12 +4,13 @@ import { MongoClient, type Db } from "mongodb";
 import { reassignIds } from "./blocks";
 import { isBlock } from "./document";
 import { seedLessons } from "./offline";
-import type { Block, ChatMessage, Lesson, LessonSummary, Progress } from "./types";
+import type { Account, Block, ChatMessage, Lesson, LessonSummary, Progress } from "./types";
 
 type DatabaseShape = {
   lessons: Lesson[];
   progress: Progress[];
   messages: ChatMessage[];
+  users: Account[];
 };
 
 const FILE = path.join(process.cwd(), ".data", "store.json");
@@ -54,7 +55,7 @@ export function storageNotice(): string | null {
 }
 
 function emptyDb(): DatabaseShape {
-  return { lessons: seedLessons(), progress: [], messages: [] };
+  return { lessons: seedLessons(), progress: [], messages: [], users: [] };
 }
 
 async function readDb(): Promise<DatabaseShape> {
@@ -62,6 +63,7 @@ async function readDb(): Promise<DatabaseShape> {
     const raw = await readFile(FILE, "utf8");
     const parsed = JSON.parse(raw) as DatabaseShape;
     if (!Array.isArray(parsed.lessons)) return emptyDb();
+    if (!Array.isArray(parsed.users)) parsed.users = [];
     return parsed;
   } catch {
     return emptyDb();
@@ -140,8 +142,8 @@ function toSummary(lesson: Lesson): LessonSummary {
   };
 }
 
-function canRead(lesson: Lesson, userId: string): boolean {
-  return lesson.visibility === "public" || lesson.ownerId === userId;
+function canRead(lesson: Lesson, userId: string | null): boolean {
+  return lesson.visibility === "public" || (userId !== null && lesson.ownerId === userId);
 }
 
 export async function listForOwner(ownerId: string): Promise<LessonSummary[]> {
@@ -240,7 +242,7 @@ export async function createLesson(lesson: Lesson): Promise<Lesson> {
 export async function saveLesson(
   id: string,
   userId: string,
-  patch: { blocks?: Block[]; title?: string; visibility?: "private" | "public" },
+  patch: { blocks?: Block[]; title?: string; summary?: string; tags?: string[]; visibility?: "private" | "public" },
 ): Promise<Lesson | null> {
   const apply = (lesson: Lesson): Lesson | null => {
     if (lesson.ownerId !== userId) return null;
@@ -249,6 +251,10 @@ export async function saveLesson(
       lesson.blocks = patch.blocks;
     }
     if (typeof patch.title === "string" && patch.title.trim()) lesson.title = patch.title.trim().slice(0, 140);
+    if (typeof patch.summary === "string" && patch.summary.trim()) lesson.summary = patch.summary.trim().slice(0, 280);
+    if (Array.isArray(patch.tags)) {
+      lesson.tags = patch.tags.map((tag) => tag.trim().slice(0, 32)).filter(Boolean).slice(0, 6);
+    }
     if (patch.visibility === "private" || patch.visibility === "public") lesson.visibility = patch.visibility;
     lesson.updatedAt = new Date().toISOString();
     return lesson;
@@ -336,6 +342,76 @@ export async function setBlockComplete(userId: string, lessonId: string, blockId
   });
 }
 
-export function lessonReadable(lesson: Lesson, userId: string): boolean {
+export function lessonReadable(lesson: Lesson, userId: string | null): boolean {
   return canRead(lesson, userId);
+}
+
+function cleanAccount(account: Account): Account {
+  const copy = { ...account } as Account & { _id?: unknown };
+  delete copy._id;
+  return copy;
+}
+
+let userIndexesReady = false;
+
+async function usersCollection() {
+  const database = await mongoDb();
+  const users = database.collection<Account>("users");
+  if (!userIndexesReady) {
+    await users.createIndex({ email: 1 }, { unique: true });
+    userIndexesReady = true;
+  }
+  return users;
+}
+
+export async function findAccountByEmail(email: string): Promise<Account | null> {
+  const normalized = email.trim().toLowerCase();
+  if ((await activeStorage()) === "mongo") {
+    const account = await (await usersCollection()).findOne({ email: normalized });
+    return account ? cleanAccount(account) : null;
+  }
+  return withFile((db) => structuredClone(db.users.find((account) => account.email === normalized) ?? null));
+}
+
+export async function findAccountByGoogleSub(googleSub: string): Promise<Account | null> {
+  if ((await activeStorage()) === "mongo") {
+    const account = await (await usersCollection()).findOne({ googleSub });
+    return account ? cleanAccount(account) : null;
+  }
+  return withFile((db) => structuredClone(db.users.find((account) => account.googleSub === googleSub) ?? null));
+}
+
+export async function createAccount(input: {
+  email: string;
+  name: string;
+  passwordHash: string | null;
+  googleSub: string | null;
+}): Promise<Account> {
+  const account: Account = {
+    id: crypto.randomUUID(),
+    email: input.email.trim().toLowerCase(),
+    name: input.name,
+    passwordHash: input.passwordHash,
+    googleSub: input.googleSub,
+    createdAt: new Date().toISOString(),
+  };
+  if ((await activeStorage()) === "mongo") {
+    await (await usersCollection()).insertOne({ ...account });
+    return account;
+  }
+  return withFile((db) => {
+    db.users.push(account);
+    return account;
+  });
+}
+
+export async function attachGoogleSub(id: string, googleSub: string): Promise<void> {
+  if ((await activeStorage()) === "mongo") {
+    await (await usersCollection()).updateOne({ id }, { $set: { googleSub } });
+    return;
+  }
+  await withFile((db) => {
+    const account = db.users.find((item) => item.id === id);
+    if (account) account.googleSub = googleSub;
+  });
 }

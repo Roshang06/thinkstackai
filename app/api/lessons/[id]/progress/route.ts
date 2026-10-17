@@ -4,8 +4,8 @@ import { getLesson, lessonReadable, setBlockComplete } from "@/lib/store";
 type Context = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, context: Context) {
-  const user = readUser(request);
-  if (!user) return jsonError("Missing user", 401);
+  const user = await readUser(request);
+  if (!user) return jsonError("Sign in required", 401);
   const { id } = await context.params;
   const lesson = await getLesson(id);
   if (!lesson || !lessonReadable(lesson, user.id)) return jsonError("Lesson not found", 404);

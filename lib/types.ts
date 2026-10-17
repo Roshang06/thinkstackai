@@ -124,6 +124,15 @@ export type ChatMessage = {
   createdAt: string;
 };
 
+export type Account = {
+  id: string;
+  email: string;
+  name: string;
+  passwordHash: string | null;
+  googleSub: string | null;
+  createdAt: string;
+};
+
 export type LessonDraftInput = {
   topic: string;
   level: Level;

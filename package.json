@@ -11,8 +11,11 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.99",
+    "@openrouter/ai-sdk-provider": "^3.1.0",
     "ai": "^7.0.143",
+    "bcryptjs": "^3.0.3",
     "function-plot": "^1.26.0",
+    "jose": "^6.2.12",
     "katex": "^0.19.0",
     "mongodb": "^7.7.0",
     "next": "16.4.2",
@@ -22,6 +25,7 @@
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
+    "@types/bcryptjs": "^2.4.6",
     "@types/katex": "^0.16.8",
     "@types/node": "^20",
     "@types/react": "^19",

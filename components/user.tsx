@@ -1,61 +1,51 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
-export type LocalUser = { id: string; name: string };
+export type SessionUser = { id: string; name: string; email: string };
 
 type UserContextValue = {
-  user: LocalUser | null;
-  setName: (name: string) => void;
+  user: SessionUser | null;
+  loading: boolean;
+  refresh: () => Promise<void>;
 };
 
-const UserContext = createContext<UserContextValue>({ user: null, setName: () => undefined });
-const STORAGE_KEY = "thinkstack-user";
+const UserContext = createContext<UserContextValue>({
+  user: null,
+  loading: true,
+  refresh: async () => undefined,
+});
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<LocalUser | null>(null);
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    const response = await fetch("/api/auth/session");
+    if (!response.ok) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+    const body = (await response.json()) as { user: SessionUser | null };
+    setUser(body.user);
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw) as LocalUser;
-          if (parsed.id && parsed.name) {
-            setUser(parsed);
-            return;
-          }
-        } catch {
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      }
-      const created = { id: crypto.randomUUID(), name: "Student" };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(created));
-      setUser(created);
+      void refresh();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [refresh]);
 
-  function setName(name: string) {
-    setUser((current) => {
-      if (!current) return current;
-      const next = { ...current, name: name.slice(0, 40) };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      return next;
-    });
-  }
-
-  return <UserContext.Provider value={{ user, setName }}>{children}</UserContext.Provider>;
+  return <UserContext.Provider value={{ user, loading, refresh }}>{children}</UserContext.Provider>;
 }
 
 export function useUser() {
   return useContext(UserContext);
 }
 
-export function userHeaders(user: LocalUser): HeadersInit {
-  return {
-    "content-type": "application/json",
-    "x-user-id": user.id,
-    "x-user-name": encodeURIComponent(user.name || "Student"),
-  };
+export function jsonHeaders(): HeadersInit {
+  return { "content-type": "application/json" };
 }

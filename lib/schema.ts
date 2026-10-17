@@ -2,7 +2,13 @@ import { z } from "zod";
 import { newId } from "./blocks";
 import type { Block } from "./types";
 
-const flatBlockSchema = z.object({
+const PLACEHOLDER = /not written yet|this page is a structure|this draft is still an outline|add a gemini|gemini api key/i;
+
+export function isPlaceholderCopy(value: string): boolean {
+  return PLACEHOLDER.test(value);
+}
+
+export const flatBlockSchema = z.object({
   type: z.enum(["prose", "equation", "graph", "quiz", "short_answer", "flashcards", "code", "simulation"]),
   heading: z.string(),
   body: z.string(),
@@ -53,7 +59,7 @@ export function normalizeBlock(input: z.infer<typeof flatBlockSchema>): Block | 
   switch (input.type) {
     case "prose": {
       const body = clip(input.body ?? "", 4000);
-      if (!body) return null;
+      if (!body || isPlaceholderCopy(body)) return null;
       return { id, type: "prose", heading: clip(input.heading || "Note", 120), body };
     }
     case "equation": {
@@ -86,7 +92,7 @@ export function normalizeBlock(input: z.infer<typeof flatBlockSchema>): Block | 
       const answerIndex = Math.round(input.answerIndex ?? 0);
       if (answerIndex < 0 || answerIndex > 3) return null;
       const prompt = clip(input.prompt ?? "", 400);
-      if (!prompt) return null;
+      if (!prompt || isPlaceholderCopy(prompt)) return null;
       return {
         id,
         type: "quiz",

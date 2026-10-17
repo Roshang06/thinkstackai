@@ -6,24 +6,23 @@ import type { Block } from "@/lib/types";
 type Context = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, context: Context) {
-  const user = readUser(request);
-  if (!user) return jsonError("Missing user", 401);
+  const user = await readUser(request);
   const { id } = await context.params;
   const lesson = await getLesson(id);
-  if (!lesson || !lessonReadable(lesson, user.id)) return jsonError("Lesson not found", 404);
-  const messages = lesson.ownerId === user.id ? await listMessages(id) : [];
-  const progress = await progressFor(user.id, [id]);
+  if (!lesson || !lessonReadable(lesson, user?.id ?? null)) return jsonError("Lesson not found", 404);
+  const messages = user && lesson.ownerId === user.id ? await listMessages(id) : [];
+  const progress = user ? await progressFor(user.id, [id]) : {};
   return Response.json({
     lesson,
     messages,
     completedBlockIds: progress[id] ?? [],
-    canEdit: lesson.ownerId === user.id,
+    canEdit: user !== null && lesson.ownerId === user.id,
   });
 }
 
 export async function PATCH(request: Request, context: Context) {
-  const user = readUser(request);
-  if (!user) return jsonError("Missing user", 401);
+  const user = await readUser(request);
+  if (!user) return jsonError("Sign in required", 401);
   const { id } = await context.params;
   const body = (await request.json()) as { blocks?: unknown; title?: string; visibility?: "private" | "public" };
   let blocks: Block[] | undefined;
@@ -41,8 +40,8 @@ export async function PATCH(request: Request, context: Context) {
 }
 
 export async function DELETE(request: Request, context: Context) {
-  const user = readUser(request);
-  if (!user) return jsonError("Missing user", 401);
+  const user = await readUser(request);
+  if (!user) return jsonError("Sign in required", 401);
   const { id } = await context.params;
   const removed = await deleteLesson(id, user.id);
   if (!removed) return jsonError("Lesson not found", 404);

@@ -4,7 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BlockView } from "./Blocks";
 import { ProgressBar } from "./ProgressBar";
-import { useUser, userHeaders } from "./user";
+import { jsonHeaders, useUser } from "./user";
 import type { Block, ChatMessage, Lesson } from "@/lib/types";
 
 export function LessonStudio() {
@@ -23,8 +23,8 @@ export function LessonStudio() {
   const saveTimer = useRef<number | null>(null);
 
   const load = useCallback(async () => {
-    if (!user || !params.id) return;
-    const response = await fetch(`/api/lessons/${params.id}`, { headers: userHeaders(user) });
+    if (!params.id) return;
+    const response = await fetch(`/api/lessons/${params.id}`);
     if (!response.ok) {
       setError("This lesson is not available.");
       return;
@@ -41,7 +41,7 @@ export function LessonStudio() {
     setCanEdit(body.canEdit);
     setTarget((current) => current ?? body.lesson.blocks[0]?.id ?? null);
     setError("");
-  }, [params.id, user]);
+  }, [params.id]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -51,13 +51,12 @@ export function LessonStudio() {
   }, [load]);
 
   function queueSave(lessonId: string, blocks: Block[]) {
-    if (!user) return;
+    if (!canEdit) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    const headers = userHeaders(user);
     saveTimer.current = window.setTimeout(() => {
       void fetch(`/api/lessons/${lessonId}`, {
         method: "PATCH",
-        headers,
+        headers: jsonHeaders(),
         body: JSON.stringify({ blocks }),
       });
     }, 400);
@@ -79,13 +78,14 @@ export function LessonStudio() {
   }
 
   async function markComplete(blockId: string) {
-    if (!user || !lesson || completed.includes(blockId)) return;
+    if (!lesson || completed.includes(blockId)) return;
     setCompleted((current) => [...current, blockId]);
-    await fetch(`/api/lessons/${lesson.id}/progress`, {
+    const response = await fetch(`/api/lessons/${lesson.id}/progress`, {
       method: "POST",
-      headers: userHeaders(user),
+      headers: jsonHeaders(),
       body: JSON.stringify({ blockId, completed: true }),
     });
+    if (!response.ok) setCompleted((current) => current.filter((id) => id !== blockId));
   }
 
   function attachSelection() {
@@ -100,36 +100,37 @@ export function LessonStudio() {
   }
 
   async function sendInstruction() {
-    if (!user || !lesson || instruction.trim().length < 2) return;
+    if (!lesson || instruction.trim().length < 2) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     setBusy(true);
     setError("");
     const response = await fetch(`/api/lessons/${lesson.id}/command`, {
       method: "POST",
-      headers: userHeaders(user),
+      headers: jsonHeaders(),
       body: JSON.stringify({ instruction, blockId: target, selection }),
     });
+    const body = (await response.json().catch(() => ({}))) as { error?: string; lesson?: Lesson; message?: ChatMessage };
     setBusy(false);
-    if (!response.ok) {
-      setError("The edit did not apply.");
+    if (!response.ok || !body.lesson || !body.message) {
+      setError(body.error ?? "The edit did not apply.");
       return;
     }
-    const body = (await response.json()) as { lesson: Lesson; message: ChatMessage };
+    const message = body.message;
     setLesson(body.lesson);
     setMessages((current) => [
       ...current,
       { id: crypto.randomUUID(), lessonId: lesson.id, role: "user", text: instruction, createdAt: new Date().toISOString() },
-      body.message,
+      message,
     ]);
     setInstruction("");
     setSelection("");
   }
 
   async function setVisibility(visibility: "public" | "private") {
-    if (!user || !lesson) return;
+    if (!lesson) return;
     const response = await fetch(`/api/lessons/${lesson.id}`, {
       method: "PATCH",
-      headers: userHeaders(user),
+      headers: jsonHeaders(),
       body: JSON.stringify({ visibility }),
     });
     if (!response.ok) return;
@@ -138,17 +139,25 @@ export function LessonStudio() {
   }
 
   async function remix() {
-    if (!user || !lesson) return;
-    const response = await fetch(`/api/lessons/${lesson.id}/remix`, { method: "POST", headers: userHeaders(user) });
+    if (!lesson) return;
+    if (!user) {
+      router.push(`/login?next=/lessons/${lesson.id}`);
+      return;
+    }
+    const response = await fetch(`/api/lessons/${lesson.id}/remix`, { method: "POST", headers: jsonHeaders() });
+    if (response.status === 401) {
+      router.push(`/login?next=/lessons/${lesson.id}`);
+      return;
+    }
     if (!response.ok) return;
     const body = (await response.json()) as { lesson: Lesson };
     router.push(`/lessons/${body.lesson.id}`);
   }
 
   async function removeLesson() {
-    if (!user || !lesson) return;
+    if (!lesson) return;
     if (!window.confirm("Delete this lesson?")) return;
-    await fetch(`/api/lessons/${lesson.id}`, { method: "DELETE", headers: userHeaders(user) });
+    await fetch(`/api/lessons/${lesson.id}`, { method: "DELETE" });
     router.push("/");
   }
 

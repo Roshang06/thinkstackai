@@ -3,7 +3,9 @@ import test from "node:test";
 import { prose } from "./blocks";
 import { applyOfflineCommand, isBlock, progressPercent } from "./document";
 import { buildLesson, matchCurated, seedLessons } from "./offline";
-import { normalizeBlock } from "./schema";
+import { generationErrorMessage } from "./gemini";
+import { geminiModelNames, providerLabels } from "./providers";
+import { isPlaceholderCopy, normalizeBlock } from "./schema";
 
 test("curated topics match the hand-written lessons", () => {
   assert.equal(matchCurated("Fourier transform for beginners"), "fourier");
@@ -86,6 +88,64 @@ test("model blocks with unsafe graph expressions are dropped", () => {
     note: "",
   });
   assert.equal(block, null);
+});
+
+test("placeholder prose from the old outline is rejected", () => {
+  assert.equal(isPlaceholderCopy("The explanations are not written yet."), true);
+  const block = normalizeBlock({
+    type: "prose",
+    heading: "Outline",
+    body: "This page is a structure for the topic. The explanations are not written yet.",
+    latex: "",
+    caption: "",
+    title: "",
+    expression: "",
+    xMin: 0,
+    xMax: 0,
+    yMin: 0,
+    yMax: 0,
+    prompt: "",
+    choices: [],
+    answerIndex: 0,
+    explanation: "",
+    accepted: [],
+    cards: [],
+    language: "javascript",
+    starter: "",
+    kind: "wave",
+    note: "",
+  });
+  assert.equal(block, null);
+});
+
+test("model providers are tried in order and blank keys are skipped", () => {
+  assert.deepEqual(
+    providerLabels({
+      OPENROUTER_API_KEY: "sk-or",
+      BACKBOARD_API_KEY: "bb",
+      GOOGLE_GENERATIVE_AI_API_KEY: "gem",
+    }),
+    ["OpenRouter", "Backboard", "Gemini"],
+  );
+  assert.deepEqual(providerLabels({ GOOGLE_GENERATIVE_AI_API_KEY: "gem" }), ["Gemini"]);
+  assert.deepEqual(providerLabels({ OPENROUTER_API_KEY: "your-key" }), []);
+  assert.deepEqual(providerLabels({ "OPENROUTER_API_KEY ": "sk-or" }), ["OpenRouter"]);
+  assert.deepEqual(providerLabels({}), []);
+});
+
+test("an overloaded Gemini model is followed by other flash models", () => {
+  assert.deepEqual(geminiModelNames({ GEMINI_MODEL: "gemini-3.8-flash" }), [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-latest",
+  ]);
+  assert.deepEqual(geminiModelNames({ GEMINI_MODEL: "gemini-3.5-flash" })[0], "gemini-3.5-flash");
+  assert.equal(new Set(geminiModelNames({ GEMINI_MODEL: "gemini-3.5-flash" })).size, 4);
+});
+
+test("quota failures become a short error", () => {
+  assert.match(generationErrorMessage(new Error("You exceeded your current quota"), "fallback"), /free requests/);
 });
 
 test("progress percent rounds", () => {

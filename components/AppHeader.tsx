@@ -1,10 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useUser } from "./user";
 
 export function AppHeader() {
-  const { user, setName } = useUser();
+  const router = useRouter();
+  const { user, loading, refresh } = useUser();
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    await refresh();
+    router.push("/");
+  }
 
   return (
     <header className="border-b border-line bg-paper/80">
@@ -20,16 +28,20 @@ export function AppHeader() {
             Explore
           </Link>
         </nav>
-        <label className="ml-auto flex items-center gap-2 text-sm text-muted">
-          Name
-          <input
-            aria-label="Display name"
-            value={user?.name ?? ""}
-            disabled={!user}
-            onChange={(event) => setName(event.target.value)}
-            className="w-32 border-b border-line bg-transparent px-1 py-0.5 text-foreground outline-none focus:border-accent"
-          />
-        </label>
+        <div className="ml-auto flex items-center gap-4 text-sm">
+          {loading ? null : user ? (
+            <>
+              <span className="text-muted">{user.name}</span>
+              <button type="button" onClick={() => void logout()} className="text-muted hover:text-foreground">
+                Log out
+              </button>
+            </>
+          ) : (
+            <Link href="/login" className="rounded-full bg-foreground px-3 py-1 text-paper">
+              Log in
+            </Link>
+          )}
+        </div>
       </div>
     </header>
   );
