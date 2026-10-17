@@ -64,8 +64,26 @@ test("public seeds are readable lessons", () => {
 test("model blocks with unsafe graph expressions are dropped", () => {
   const block = normalizeBlock({
     type: "graph",
+    heading: "",
+    body: "",
+    latex: "",
+    caption: "",
     title: "Nope",
     expression: "fetch('https://example.com')",
+    xMin: 0,
+    xMax: 0,
+    yMin: 0,
+    yMax: 0,
+    prompt: "",
+    choices: [],
+    answerIndex: 0,
+    explanation: "",
+    accepted: [],
+    cards: [],
+    language: "javascript",
+    starter: "",
+    kind: "wave",
+    note: "",
   });
   assert.equal(block, null);
 });
