@@ -15,6 +15,7 @@ export function CoursePage() {
   const [course, setCourse] = useState<Course | null>(null);
   const [lessons, setLessons] = useState<LessonSummary[]>([]);
   const [roster, setRoster] = useState<Enrollment[]>([]);
+  const [classmates, setClassmates] = useState<Enrollment[]>([]);
   const [mine, setMine] = useState<LessonSummary[]>([]);
   const [membership, setMembership] = useState<Membership>("visitor");
   const [lessonId, setLessonId] = useState("");
@@ -26,10 +27,11 @@ export function CoursePage() {
       setError("Course not found.");
       return;
     }
-    const body = (await response.json()) as { course: Course; lessons: LessonSummary[]; roster: Enrollment[]; membership: Membership };
+    const body = (await response.json()) as { course: Course; lessons: LessonSummary[]; roster: Enrollment[]; classmates?: Enrollment[]; membership: Membership };
     setCourse(body.course);
     setLessons(body.lessons);
     setRoster(body.roster);
+    setClassmates(body.classmates ?? []);
     setMembership(body.membership);
     setError("");
   }, [courseId]);
@@ -70,6 +72,13 @@ export function CoursePage() {
 
   async function decide(userId: string, action: "member" | "remove") {
     await fetch(`/api/courses/${courseId}/roster`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ userId, action }) });
+    await load();
+  }
+
+  async function leave() {
+    if (!window.confirm("Leaving cannot be undone. You will need to request to join and be approved again.")) return;
+    await fetch(`/api/courses/${courseId}/roster`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify({ action: "leave" }) });
+    setClassmates([]);
     await load();
   }
 
@@ -169,6 +178,23 @@ export function CoursePage() {
               ))}
             </ul>
           </div>
+        </section>
+      ) : null}
+      {membership === "member" ? (
+        <section className="mt-10">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display text-3xl">Students</h2>
+            <button type="button" onClick={() => void leave()} className="text-sm text-danger">
+              Leave
+            </button>
+          </div>
+          <ul className="mt-3 grid gap-2">
+            {classmates.map((row) => (
+              <li key={row.userId} className="rounded-2xl border border-line px-3 py-2">
+                {row.userName}
+              </li>
+            ))}
+          </ul>
         </section>
       ) : null}
     </div>

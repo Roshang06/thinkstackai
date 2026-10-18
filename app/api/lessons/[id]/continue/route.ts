@@ -46,10 +46,12 @@ export async function POST(request: Request, context: Context) {
 
     const section = lesson.sections[sectionIndex];
     const widget = pendingWidget(section);
+    const coach = /^(?:Paused|Note):\s*([\s\S]*)$/.exec(lesson.activity)?.[1]?.trim() ?? "";
     const activity = widget
       ? `Building an interaction for ${section.title}`
       : `Writing section ${sectionIndex + 1} of ${lesson.sections.length}: ${section.title}`;
-    await saveLesson(id, user.id, { activity: `Working: ${activity}` });
+    const claimed = await saveLesson(id, user.id, { activity: `Working: ${activity}` });
+    const claimStamp = claimed?.updatedAt;
     send("status", { activity });
 
     try {
@@ -64,8 +66,15 @@ export async function POST(request: Request, context: Context) {
           minutes: lesson.minutes,
           section,
           earlierTitles: lesson.sections.slice(0, sectionIndex).map((item) => item.title),
+          note: coach,
         });
         sections[sectionIndex] = { ...section, blocks };
+      }
+      const latest = await getLesson(id);
+      if (!latest || latest.updatedAt !== claimStamp) {
+        send("lesson", latest ?? lesson);
+        send("done", { stage: latest?.stage ?? "drafting", retry: false, paused: true });
+        return;
       }
       const finished = sectionIndex === lesson.sections.length - 1 && !sections.some((item) => item.blocks.length === 0 || pendingWidget(item));
       const saved = await saveLesson(id, user.id, {
@@ -76,7 +85,8 @@ export async function POST(request: Request, context: Context) {
       send("lesson", saved);
       send("done", { stage: saved?.stage ?? "drafting", retry: false });
     } catch (error) {
-      await saveLesson(id, user.id, { activity: "" });
+      const latest = await getLesson(id);
+      if (latest?.updatedAt === claimStamp) await saveLesson(id, user.id, { activity: "" });
       send("error", { error: generationErrorMessage(error, "This section failed. Try again.") });
       send("done", { stage: "drafting", retry: false });
     }

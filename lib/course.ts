@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { equation, newId, prose, quiz } from "./blocks";
 import { runDocumentProviders, runSpecialist } from "./providers";
+import { isDisplayMath, tidySectionParts } from "./markup";
 import { insertProse, minutesForSections, proseDepth, sectionBounds } from "./sections";
-import type { Block, Lesson, LessonSection, Level, WidgetBlock } from "./types";
+import type { Block, Lesson, LessonSection, WidgetBlock } from "./types";
 import { sandboxDocument, widgetFallback } from "./widget";
 
 const outlineSchema = z.object({
@@ -41,7 +42,7 @@ function words(value: string): number {
   return value.split(/\s+/).filter(Boolean).length;
 }
 
-export async function planLesson(input: { topic: string; level: Level; minutes: number; notes?: string }): Promise<LessonOutline> {
+export async function planLesson(input: { topic: string; level: string; minutes: number; notes?: string }): Promise<LessonOutline> {
   const bounds = sectionBounds(input.minutes);
   let written: LessonOutline | null = null;
   await runDocumentProviders({
@@ -70,7 +71,7 @@ export async function planLesson(input: { topic: string; level: Level; minutes: 
           if (!title || sections.length < 2) {
             return { ok: false, error: "Plan at least 2 sections. Each needs a title and an objective." };
           }
-          const kept = sections.slice(0, 6);
+          const kept = sections.slice(0, 8);
           const minutes = minutesForSections(kept.length);
           written = {
             title: title.slice(0, 140),
@@ -87,7 +88,7 @@ export async function planLesson(input: { topic: string; level: Level; minutes: 
     system: [
       "Call write_outline once. A prose reply is a failure.",
       "You decide how long the lesson is from the prompt. A suggested length is only a hint.",
-      "A single definition or a narrow question is 2 sections. A topic with several distinct ideas is 4 to 6 sections. Never plan more than 6.",
+      "A single definition or a narrow question is 2 sections. A topic with several distinct ideas is 4 to 6 sections. A long custom request can be 8. Never plan more than 8.",
       `The learner suggested about ${input.minutes} minutes, which usually means ${bounds.min} to ${bounds.max} sections. Leave that range when the prompt clearly asks for something shorter or broader.`,
       "Sections are taught one at a time, in order. Section 1 introduces the idea. Later sections go deeper. Do not make every section a summary of the whole topic.",
       "objective is one sentence a writer can expand into several paragraphs.",
@@ -114,10 +115,11 @@ export function draftSections(outline: LessonOutline): LessonSection[] {
 
 export async function writeSection(input: {
   topic: string;
-  level: Level;
+  level: string;
   minutes: number;
   section: LessonSection;
   earlierTitles: string[];
+  note?: string;
 }): Promise<Block[]> {
   const depth = proseDepth(input.minutes);
   const minimum = Math.round(depth.words * 0.55) * depth.parts;
@@ -150,13 +152,17 @@ export async function writeSection(input: {
           const prompt = text(record.checkPrompt || record.prompt || record.question);
           const choices = (Array.isArray(record.choices) ? record.choices : []).map((choice) => text(choice)).filter(Boolean).slice(0, 4);
           const total = written.reduce((sum, part) => sum + words(part.body), 0);
-          if (written.length < 2 || total < minimum || !prompt || choices.length !== 4) {
+          const floor = Math.round(depth.words * 0.45);
+          const short = written.find((part) => words(part.body) < floor);
+          if (written.length < 2 || short || total < minimum || !prompt || choices.length !== 4) {
             return {
               ok: false,
-              error: `Write at least 2 parts and about ${depth.words} words in each. Include a 4-choice quiz. Current length is ${total} words.`,
+              error: short
+                ? `Each part needs about ${depth.words} words. One part is only ${words(short.body)} words. Add paragraphs, not another heading.`
+                : `Write at least 2 parts and about ${depth.words} words in each. Include a 4-choice quiz. Current length is ${total} words.`,
             };
           }
-          parts = written.slice(0, depth.parts + 1);
+          parts = tidySectionParts(written.slice(0, depth.parts + 1), input.section.title);
           check = {
             prompt,
             choices,
@@ -172,8 +178,10 @@ export async function writeSection(input: {
     system: [
       "Call write_section once. A prose reply is a failure.",
       `This is only the section “${input.section.title}” of a longer lesson. Do not summarize the other sections.`,
-      `Write ${depth.parts} parts. Each body is about ${depth.words} words, in several paragraphs under that one heading. Do not add a new heading for every sentence.`,
-      "Put a formula in the paragraph between dollar signs, like $y = x^2$. Leave equationLatex empty unless you could not place the formula in the text.",
+      `Write ${depth.parts} parts. Each body is about ${depth.words} words, in several paragraphs. The section title is already visible, so leave heading empty unless a later part starts a genuinely new subtopic.`,
+      "Never repeat a heading, and never use the section title as a heading. If you need a subheading inside a paragraph, write it as <h2>Subtopic</h2> on its own line. Use <h1> only for a title that is not already the section title.",
+      "Wrap a word in **double asterisks** when it should be bold.",
+      "A variable or short formula stays inside the sentence as $V$. Use $$...$$ only for a long formula that needs its own line, such as a fraction or an integral. Leave equationLatex empty unless you could not place the formula in the text.",
       "checkPrompt is one 4-choice quiz about this section. answerIndex is 0, 1, 2, or 3.",
       input.section.interaction
         ? "A specialist is building a playable interaction from a separate brief. Teach the idea, and do not describe the game's controls."
@@ -186,14 +194,15 @@ export async function writeSection(input: {
       `Section: ${input.section.title}`,
       `Objective: ${input.section.objective}`,
       input.earlierTitles.length ? `Already taught: ${input.earlierTitles.join("; ")}` : "This is the first section.",
-    ].join("\n"),
+      input.note?.trim() ? `Instructor note for this step: ${input.note.trim().slice(0, 500)}` : "",
+    ].filter(Boolean).join("\n"),
   });
 
   if (!accepted) throw new Error("The model did not write this section");
-  const blocks: Block[] = parts.map((part, index) => {
-    const math = index === 0 && formula.latex ? `\n\n$$${formula.latex}$$` : "";
+  const blocks: Block[] = tidySectionParts(parts, input.section.title).map((part, index) => {
+    const math = index === 0 && formula.latex ? (isDisplayMath(formula.latex) ? `\n\n$$${formula.latex}$$` : ` $${formula.latex}$`) : "";
     const note = index === 0 && formula.caption ? `\n\n${formula.caption}` : "";
-    return prose(part.heading || input.section.title, `${part.body}${math}${note}`);
+    return prose(part.heading, `${part.body}${math}${note}`);
   });
   if (input.section.interaction) {
     blocks.push({
@@ -451,12 +460,16 @@ export async function buildWidget(input: { topic: string; level: string; title: 
   const drafted = await runSpecialist({
     toolName: "return_widget",
     inputSchema: z.object({ title: z.string(), html: z.string() }),
+    models: [
+      { provider: "openai", name: "gpt-4o-mini" },
+      { provider: "anthropic", name: "claude-sonnet-4-6" },
+    ],
+    timeoutMs: 22_000,
     system: [
       "Call return_widget once. Do not reply with prose.",
-      "html is one self-contained document with inline CSS and JavaScript.",
-      "No external URLs, no libraries, no network, no iframes.",
-      "Build one small educational game or simulation for the brief. The learner manipulates something and can tell whether they succeeded.",
-      "Keep it under 250 lines. Use a canvas or plain DOM.",
+      "html is one short page: inline CSS, a few lines of JavaScript, no libraries, no network, no iframes.",
+      "One control the learner can move or click, and a visible way to tell whether they succeeded.",
+      "Stay under 80 lines.",
     ].join(" "),
     prompt: `Topic: ${input.topic}\nLevel: ${input.level}\nSection: ${input.title}\nBrief: ${input.brief}`,
   });

@@ -152,7 +152,7 @@ type BackboardReply = {
   toolCalls?: BackboardCall[];
 };
 
-async function backboard(path: string, body: unknown): Promise<BackboardReply> {
+async function backboard(path: string, body: unknown, timeoutMs = 45_000): Promise<BackboardReply> {
   const response = await fetch(`https://app.backboard.io/api${path}`, {
     method: "POST",
     headers: {
@@ -160,7 +160,7 @@ async function backboard(path: string, body: unknown): Promise<BackboardReply> {
       "X-API-Key": readEnv(process.env, "BACKBOARD_API_KEY")?.trim() ?? "",
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`Backboard ${response.status}: ${text.slice(0, 300)}`);
@@ -184,6 +184,7 @@ async function runBackboard(
     prompt: string;
     tools: Record<string, DocumentTool>;
     steps: number;
+    timeoutMs?: number;
   },
   model: BackboardModel,
 ): Promise<void> {
@@ -195,6 +196,7 @@ async function runBackboard(
       parameters: jsonSchema(definition.inputSchema),
     },
   }));
+  const timeoutMs = options.timeoutMs ?? 45_000;
   let reply = await backboard("/threads/messages", {
     content: options.prompt,
     system_prompt: options.system,
@@ -204,7 +206,7 @@ async function runBackboard(
     memory: "off",
     llm_provider: model.provider,
     model_name: model.name,
-  });
+  }, timeoutMs);
 
   for (let step = 0; step < options.steps; step += 1) {
     const status = (reply.status ?? "").toUpperCase();
@@ -228,7 +230,7 @@ async function runBackboard(
       thread_id: threadId,
       tool_outputs: outputs,
       stream: false,
-    });
+    }, timeoutMs);
   }
 }
 
@@ -237,10 +239,12 @@ export async function runSpecialist(options: {
   prompt: string;
   toolName: string;
   inputSchema: z.ZodType;
+  models?: BackboardModel[];
+  timeoutMs?: number;
 }): Promise<Record<string, unknown> | null> {
   if (!configuredKey(readEnv(process.env, "BACKBOARD_API_KEY"))) return null;
   const first = specialistModel();
-  const models = [first, ...backboardModels().filter((model) => model.provider !== first.provider || model.name !== first.name)];
+  const models = options.models ?? [first, ...backboardModels().filter((model) => model.provider !== first.provider || model.name !== first.name)];
   let captured: Record<string, unknown> | null = null;
   for (const model of models) {
     captured = null;
@@ -250,6 +254,7 @@ export async function runSpecialist(options: {
           system: options.system,
           prompt: options.prompt,
           steps: 2,
+          timeoutMs: options.timeoutMs,
           tools: {
             [options.toolName]: {
               description: "Return the finished block.",

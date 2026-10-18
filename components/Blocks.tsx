@@ -2,6 +2,7 @@
 
 import katex from "katex";
 import { useEffect, useRef, useState } from "react";
+import { parseMarkup, type Inline } from "@/lib/markup";
 import { CODE_FRAME } from "./code-frame";
 import { useMarkVisible } from "./useMarkVisible";
 import type {
@@ -40,20 +41,39 @@ const LABELS: Record<Block["type"], string> = {
   widget: "Interaction",
 };
 
+function mathHtml(latex: string, display: boolean): string {
+  return katex.renderToString(latex, { throwOnError: false, displayMode: display });
+}
+
+function InlineText({ children }: { children: Inline[] }) {
+  return (
+    <>
+      {children.map((child, index) => {
+        if (child.type === "bold") return <strong key={index}>{child.text}</strong>;
+        if (child.type === "math") return <span key={index} dangerouslySetInnerHTML={{ __html: mathHtml(child.latex, false) }} />;
+        return <span key={index}>{child.text}</span>;
+      })}
+    </>
+  );
+}
+
 function RichText({ text }: { text: string }) {
-  const chunks = text.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
+  const blocks = parseMarkup(text);
   return (
     <div className="space-y-4 text-lg leading-8">
-      {chunks.map((chunk, index) => {
-        if (chunk.startsWith("$$") && chunk.endsWith("$$")) {
-          const html = katex.renderToString(chunk.slice(2, -2), { throwOnError: false, displayMode: true });
-          return <div key={index} className="overflow-x-auto py-2" dangerouslySetInnerHTML={{ __html: html }} />;
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const Tag = block.level === 1 ? "h2" : "h3";
+          return <Tag key={index} className="font-display text-3xl tracking-tight">{block.text}</Tag>;
         }
-        if (chunk.startsWith("$") && chunk.endsWith("$")) {
-          const html = katex.renderToString(chunk.slice(1, -1), { throwOnError: false, displayMode: false });
-          return <span key={index} dangerouslySetInnerHTML={{ __html: html }} />;
+        if (block.type === "math") {
+          return <div key={index} className="overflow-x-auto py-2" dangerouslySetInnerHTML={{ __html: mathHtml(block.latex, true) }} />;
         }
-        return chunk.split(/\n\n+/).filter(Boolean).map((paragraph, paragraphIndex) => <p key={`${index}-${paragraphIndex}`}>{paragraph}</p>);
+        return (
+          <p key={index}>
+            <InlineText children={block.children} />
+          </p>
+        );
       })}
     </div>
   );
@@ -85,7 +105,7 @@ export function BlockView(props: BlockProps) {
     <article
       data-block-id={block.id}
       onClick={props.onSelect}
-      className={`scroll-mt-24 ${quiet ? "py-4" : "border-t border-line py-8"} ${props.selected && !quiet ? "bg-accent-soft/40" : ""}`}
+      className={`scroll-mt-24 ${quiet ? "py-4" : "border-t border-line py-8"} ${props.selected && !quiet && block.type !== "quiz" && block.type !== "short_answer" ? "bg-accent-soft/40" : ""}`}
     >
       {quiet ? null : (
         <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -120,9 +140,9 @@ function ProseView({ block, canEdit, onChange, onComplete }: BlockProps & { bloc
           onChange={(event) => onChange({ ...block, heading: event.target.value })}
           className="mb-3 w-full bg-transparent font-display text-3xl text-foreground outline-none"
         />
-      ) : (
+      ) : block.heading.trim() ? (
         <h2 className="mb-3 font-display text-3xl">{block.heading}</h2>
-      )}
+      ) : null}
       {canEdit ? <AutoText value={block.body} onChange={(body) => onChange({ ...block, body })} /> : <RichText text={block.body} />}
     </div>
   );
@@ -197,7 +217,7 @@ function QuizView({ block, onComplete }: BlockProps & { block: QuizBlock }) {
   const [wrong, setWrong] = useState<number[]>([]);
   const [solved, setSolved] = useState(false);
   return (
-    <div>
+    <div className={solved ? "rounded-2xl bg-accent-soft/60 p-4" : ""} onClick={(event) => event.stopPropagation()}>
       <h2 className="mb-4 font-display text-3xl">{block.prompt}</h2>
       <div className="grid gap-2">
         {block.choices.map((option, index) => {
@@ -241,7 +261,7 @@ function ShortAnswerView({ block, onComplete }: BlockProps & { block: ShortAnswe
   }
 
   return (
-    <div>
+    <div onClick={(event) => event.stopPropagation()}>
       <h2 className="mb-4 font-display text-3xl">{block.prompt}</h2>
       <form
         className="flex gap-2"

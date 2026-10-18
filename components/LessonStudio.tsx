@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { displayProse } from "@/lib/markup";
 import { BlockView } from "./Blocks";
 import { readSse } from "./read-sse";
 import { ProgressBar } from "./ProgressBar";
@@ -25,8 +26,13 @@ export function LessonStudio() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [activity, setActivity] = useState("");
   const [retrying, setRetrying] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [coachNote, setCoachNote] = useState("");
   const saveTimer = useRef<number | null>(null);
   const pumping = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const lastSelection = useRef<{ text: string; blockId: string } | null>(null);
+  const skipScroll = useRef(true);
 
   const load = useCallback(async () => {
     if (!params.id) return;
@@ -57,7 +63,7 @@ export function LessonStudio() {
   }, [load]);
 
   useEffect(() => {
-    if (!lesson || lesson.stage !== "drafting" || !canEdit || pumping.current) return;
+    if (!lesson || lesson.stage !== "drafting" || !canEdit || paused || pumping.current) return;
     pumping.current = true;
     let cancelled = false;
     const lessonId = lesson.id;
@@ -65,7 +71,9 @@ export function LessonStudio() {
     async function pump() {
       try {
         while (!cancelled) {
-          const response = await fetch(`/api/lessons/${lessonId}/continue`, { method: "POST", headers: jsonHeaders() });
+          const controller = new AbortController();
+          abortRef.current = controller;
+          const response = await fetch(`/api/lessons/${lessonId}/continue`, { method: "POST", headers: jsonHeaders(), signal: controller.signal });
           if (!response.ok) {
             const body = (await response.json().catch(() => ({}))) as { error?: string };
             if (!cancelled) setError(body.error ?? "Generation stopped.");
@@ -92,8 +100,12 @@ export function LessonStudio() {
           }
           if (step.retry) await new Promise((resolve) => window.setTimeout(resolve, 1500));
         }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (!cancelled) setError("Generation stopped.");
       } finally {
         pumping.current = false;
+        abortRef.current = null;
       }
     }
 
@@ -102,7 +114,7 @@ export function LessonStudio() {
       cancelled = true;
       pumping.current = false;
     };
-  }, [canEdit, lesson?.id, lesson?.stage, retrying]);
+  }, [canEdit, lesson?.id, lesson?.stage, paused, retrying]);
 
   function queueSave(lessonId: string, sectionId: string, blocks: Block[]) {
     if (!canEdit || lesson?.stage === "drafting") return;
@@ -148,15 +160,62 @@ export function LessonStudio() {
     if (!response.ok) setCompleted((current) => current.filter((id) => id !== blockId));
   }
 
+  useEffect(() => {
+    function remember() {
+      const current = window.getSelection();
+      if (!current || current.isCollapsed) return;
+      const node = current.anchorNode;
+      const element = node instanceof Element ? node : node?.parentElement;
+      const blockId = element?.closest("[data-block-id]")?.getAttribute("data-block-id");
+      const text = current.toString().trim();
+      if (!blockId || text.length < 1) return;
+      lastSelection.current = { text: text.slice(0, 500), blockId };
+    }
+    document.addEventListener("mouseup", remember);
+    return () => document.removeEventListener("mouseup", remember);
+  }, []);
+
+  useEffect(() => {
+    if (skipScroll.current) {
+      skipScroll.current = false;
+      return;
+    }
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [sectionIndex]);
+
   function attachSelection() {
     const current = window.getSelection();
-    if (!current || current.isCollapsed) return;
-    const node = current.anchorNode;
+    const live = current && !current.isCollapsed ? current.toString().trim() : "";
+    const node = current?.anchorNode;
     const element = node instanceof Element ? node : node?.parentElement;
-    const blockId = element?.closest("[data-block-id]")?.getAttribute("data-block-id");
-    if (!blockId) return;
+    const liveBlock = element?.closest("[data-block-id]")?.getAttribute("data-block-id");
+    const saved = lastSelection.current;
+    const text = live || saved?.text || "";
+    const blockId = (live && liveBlock) || saved?.blockId;
+    if (!text || !blockId) return;
     setTarget(blockId);
-    setSelection(current.toString().slice(0, 500));
+    setSelection(text.slice(0, 500));
+  }
+
+  async function controlGeneration(action: "pause" | "resume" | "skip") {
+    if (!lesson) return;
+    if (action === "pause" || action === "skip") {
+      setPaused(true);
+      abortRef.current?.abort();
+    }
+    const response = await fetch(`/api/lessons/${lesson.id}/control`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ action, note: coachNote }),
+    });
+    const body = (await response.json().catch(() => ({}))) as { lesson?: Lesson; paused?: boolean; error?: string };
+    if (!response.ok || !body.lesson) {
+      setError(body.error ?? "Could not update the tutor.");
+      return;
+    }
+    setLesson(body.lesson);
+    setPaused(Boolean(body.paused));
+    if (action === "resume" || body.paused === false) setRetrying((count) => count + 1);
   }
 
   async function sendInstruction() {
@@ -302,7 +361,13 @@ export function LessonStudio() {
               <span className="relative h-2 w-24 overflow-hidden rounded-full bg-line">
                 <span className="absolute inset-y-0 w-8 animate-thinkstack bg-accent" />
               </span>
-              <p className="text-sm">{activity || lesson.activity.replace(/^Working:\s*/, "") || "Starting the lesson"}</p>
+              <p className="text-sm">{paused ? "Paused" : activity || lesson.activity.replace(/^(?:Working|Paused|Note):\s*/, "") || "Starting the lesson"}</p>
+              <button type="button" onClick={() => void controlGeneration(paused ? "resume" : "pause")} className="rounded-full border border-line px-3 py-1 text-sm">
+                {paused ? "Resume" : "Pause"}
+              </button>
+              <button type="button" onClick={() => void controlGeneration("skip")} className="rounded-full border border-line px-3 py-1 text-sm">
+                Skip this step
+              </button>
             </div>
           </div>
         ) : null}
@@ -320,10 +385,14 @@ export function LessonStudio() {
             {section.blocks.length === 0 ? (
               <p className="mt-6 max-w-2xl text-lg text-muted">{section.objective || "This section is next."}</p>
             ) : (
-              section.blocks.map((block, index) => (
+              section.blocks.map((block, index) => {
+                const previous = section.blocks[index - 1];
+                const previousHeading = previous && previous.type === "prose" ? previous.heading : section.title;
+                const shown = block.type === "prose" ? { ...block, ...displayProse(block.heading, block.body, section.title, previousHeading) } : block;
+                return (
                 <BlockView
                   key={block.id}
-                  block={block}
+                  block={shown}
                   index={index}
                   selected={target === block.id}
                   canEdit={canEdit && !drafting}
@@ -334,7 +403,8 @@ export function LessonStudio() {
                   onChange={updateBlock}
                   onRemove={() => removeBlock(block.id)}
                 />
-              ))
+                );
+              })
             )}
             <div className="flex items-center justify-between gap-4 py-8">
               <button
@@ -392,7 +462,28 @@ export function LessonStudio() {
             ))}
           </ol>
           {drafting ? (
-            <p className="mt-4 text-sm text-muted">You can edit when the sections finish.</p>
+            <div className="grid gap-2 border-t border-line px-4 py-3">
+              <textarea
+                value={coachNote}
+                onChange={(event) => {
+                  setCoachNote(event.target.value);
+                  const element = event.target;
+                  element.style.height = "auto";
+                  element.style.height = `${element.scrollHeight}px`;
+                }}
+                placeholder="Tell it to skip the interaction, or what to do when it resumes."
+                rows={2}
+                className="w-full resize-none overflow-hidden border border-line bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+              <div className="flex gap-2">
+                <button type="button" onClick={() => void controlGeneration(paused ? "resume" : "pause")} className="rounded-full border border-line px-3 py-2 text-sm">
+                  {paused ? "Resume" : "Pause"}
+                </button>
+                <button type="button" onClick={() => void controlGeneration("skip")} className="rounded-full bg-foreground px-3 py-2 text-sm text-paper">
+                  Skip this step
+                </button>
+              </div>
+            </div>
           ) : (
             <form
               className="grid gap-2 border-t border-line px-4 py-3"
@@ -417,7 +508,14 @@ export function LessonStudio() {
                 className="w-full resize-none border border-line bg-background px-3 py-2 text-sm outline-none focus:border-accent"
               />
               <div className="flex gap-2">
-                <button type="button" onClick={attachSelection} className="rounded-full border border-line px-3 py-2 text-sm">
+                <button
+                  type="button"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    attachSelection();
+                  }}
+                  className="rounded-full border border-line px-3 py-2 text-sm"
+                >
                   Use selection
                 </button>
                 <button type="submit" disabled={busy} className="rounded-full bg-accent px-3 py-2 text-sm text-paper disabled:opacity-60">

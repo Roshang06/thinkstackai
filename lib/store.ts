@@ -273,7 +273,7 @@ export async function saveLesson(
       }
       lesson.blocks = flattenSections(lesson.sections);
     }
-    if (patch.minutes === 5 || patch.minutes === 10 || patch.minutes === 20 || (typeof patch.minutes === "number" && patch.minutes >= 5 && patch.minutes <= 30)) {
+    if (typeof patch.minutes === "number" && patch.minutes >= 5 && patch.minutes <= 120) {
       lesson.minutes = Math.round(patch.minutes);
     }
     if (patch.stage === "drafting" || patch.stage === "ready") lesson.stage = patch.stage;
@@ -694,6 +694,18 @@ export async function setEnrollment(courseId: string, ownerId: string, userId: s
     const row = db.enrollments.find((item) => item.courseId === courseId && item.userId === userId);
     if (row) row.status = "member";
     return true;
+  });
+}
+
+export async function leaveCourse(courseId: string, userId: string): Promise<boolean> {
+  if ((await activeStorage()) === "mongo") {
+    const result = await (await mongoDb()).collection<Enrollment>("enrollments").deleteOne({ courseId, userId });
+    return result.deletedCount === 1;
+  }
+  return withFile((db) => {
+    const before = db.enrollments.length;
+    db.enrollments = db.enrollments.filter((row) => !(row.courseId === courseId && row.userId === userId));
+    return db.enrollments.length < before;
   });
 }
 

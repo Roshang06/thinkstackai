@@ -15,11 +15,14 @@ export async function GET(request: Request, context: Context) {
   const canOpen = course.visibility === "public" || isOwner || enrollment?.status === "member";
   if (!canOpen) return jsonError("Course not found", 404);
   const lessons = (await getLessonsByIds(course.lessonIds)).map(toSummary);
-  const roster = isOwner ? await listEnrollments(course.id) : [];
+  const enrollmentRows = isOwner || enrollment?.status === "member" ? await listEnrollments(course.id) : [];
+  const roster = isOwner ? enrollmentRows : [];
+  const classmates = enrollment?.status === "member" ? enrollmentRows.filter((row) => row.status === "member") : [];
   return Response.json({
     course,
     lessons,
     roster,
+    classmates,
     membership: isOwner ? "owner" : enrollment?.status ?? "visitor",
   });
 }

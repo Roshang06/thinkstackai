@@ -103,7 +103,7 @@ export type Lesson = {
   institution: string;
   title: string;
   topic: string;
-  level: Level;
+  level: string;
   minutes: number;
   tags: string[];
   visibility: "private" | "public";
@@ -123,7 +123,7 @@ export type LessonSummary = {
   institution: string;
   title: string;
   topic: string;
-  level: Level;
+  level: string;
   minutes: number;
   tags: string[];
   visibility: "private" | "public";
@@ -202,7 +202,7 @@ export type Profile = {
 
 export type LessonDraftInput = {
   topic: string;
-  level: Level;
+  level: string;
   minutes: number;
   notes?: string;
   ownerId: string;

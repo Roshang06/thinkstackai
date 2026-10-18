@@ -24,3 +24,14 @@ Thinkstack is course software for schools. Instructors plan lessons with a model
 6. Courses: create, publish, request to join an instructor course, roster, attach and remove lessons, explore by instructor or institution.
 
 Grading and due dates stay out of this pass.
+
+## Reading and generation
+
+- Custom lesson length is any whole number of minutes from 5 to 120. Custom level is free text. Presets stay available.
+- A heading is rendered only when it is new. The model may write `<h2>Subtopic</h2>` inside the prose. `**word**` is bold.
+- `$V$` stays in the sentence. `$$...$$` is its own line only when the formula is long or uses a structure such as a fraction.
+- A quiz turns the whole card green only after the correct choice. A wrong choice is red.
+- Moving to the next section scrolls to the top.
+- Use selection keeps the highlighted text even after the button is pressed.
+- While a lesson is drafting, Pause, Resume, and Skip this step accept a note. Skip fills an unfinished interaction and lets the rest continue. A faster model writes interactions first.
+- Enrolled students see classmates and can leave. They do not see join requests. Leaving requires confirmation and removes the seat.

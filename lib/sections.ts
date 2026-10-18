@@ -9,13 +9,14 @@ export function sectionCount(minutes: number): number {
 }
 
 export function sectionBounds(minutes: number): { min: number; max: number } {
-  if (minutes <= 5) return { min: 2, max: 3 };
+  if (minutes <= 8) return { min: 2, max: 3 };
+  if (minutes >= 40) return { min: 5, max: 8 };
   if (minutes >= 20) return { min: 4, max: 6 };
   return { min: 2, max: 6 };
 }
 
 export function minutesForSections(count: number): number {
-  return Math.min(30, Math.max(5, count * 4));
+  return Math.min(60, Math.max(5, count * 4));
 }
 
 export function proseDepth(minutes: number): { parts: number; words: number } {

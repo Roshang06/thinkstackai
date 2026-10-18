@@ -7,6 +7,7 @@ import { generationErrorMessage } from "./gemini";
 import { backboardModels, geminiModelNames, providerLabels, specialistModel } from "./providers";
 import { attachArtifacts, isPlaceholderCopy, normalizeBlock } from "./schema";
 import { normalizeBirthday, normalizeInstitution, normalizeInterests } from "./profile";
+import { isDisplayMath, parseMarkup, tidySectionParts } from "./markup";
 import { insertProse, minutesForSections, normalizeLesson, sectionBounds, sectionCount } from "./sections";
 import { sandboxDocument } from "./widget";
 import type { Block } from "./types";
@@ -255,6 +256,31 @@ test("a requested subsection is inserted after the highlighted block", () => {
   assert.equal(next?.[0]?.blocks[1]?.type, "prose");
   if (next?.[0]?.blocks[1]?.type === "prose") assert.match(next[0].blocks[1].heading, /Critical path/);
   assert.equal(insertProse(sections, { sectionId: "missing", afterBlockId: highlighted, heading: "No", body: "Too short to count as a paragraph for the reader." }), null);
+});
+
+test("short math stays inline and repeated headings are dropped", () => {
+  assert.equal(isDisplayMath("V"), false);
+  assert.equal(isDisplayMath("\\frac{V}{R}"), true);
+  const blocks = parseMarkup("The voltage is $V$ in **series**.\n\n<h2>Loops</h2>\nA loop is closed.\n\n$$\\frac{1}{R}$$");
+  assert.equal(blocks[0]?.type, "paragraph");
+  if (blocks[0]?.type === "paragraph") {
+    assert.equal(blocks[0].children.some((child) => child.type === "math"), true);
+    assert.equal(blocks[0].children.some((child) => child.type === "bold"), true);
+  }
+  assert.equal(blocks.some((block) => block.type === "heading"), true);
+  assert.equal(blocks.some((block) => block.type === "math"), true);
+  const parts = tidySectionParts(
+    [
+      { heading: "Ohm's law", body: "Current depends on voltage." },
+      { heading: "Ohm's law", body: "<h2>Ohm's law</h2>\nThe same idea again, with more detail about resistance." },
+      { heading: "Power", body: "Power is voltage times current." },
+    ],
+    "Ohm's law",
+  );
+  assert.equal(parts[0]?.heading, "");
+  assert.equal(parts[1]?.heading, "");
+  assert.equal(parts[1]?.body.startsWith("<h2>"), false);
+  assert.equal(parts[2]?.heading, "Power");
 });
 
 test("signup profile fields stay private and bounded", () => {

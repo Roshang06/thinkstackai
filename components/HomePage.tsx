@@ -3,10 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { jsonHeaders, useUser } from "./user";
-import type { Level } from "@/lib/types";
-
 type Status = { liveModel: boolean; storage: "file" | "mongo"; storageNote: string | null };
-type Draft = { topic: string; level: Level; minutes: 5 | 10 | 20; notes: string };
+type Draft = { topic: string; level: string; minutes: number; notes: string };
+
+const LEVELS = ["middle", "high", "university"] as const;
 
 const DRAFT_KEY = "thinkstack-draft";
 let draftStarted = false;
@@ -17,8 +17,12 @@ export function HomePage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [topic, setTopic] = useState("");
   const [notes, setNotes] = useState("");
-  const [level, setLevel] = useState<Level>("high");
-  const [minutes, setMinutes] = useState<5 | 10 | 20>(10);
+  const [level, setLevel] = useState("high");
+  const [minutes, setMinutes] = useState(10);
+  const [customLevel, setCustomLevel] = useState("");
+  const [customMinutes, setCustomMinutes] = useState("");
+  const [levelCustom, setLevelCustom] = useState(false);
+  const [timeCustom, setTimeCustom] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const started = useRef(false);
@@ -41,8 +45,12 @@ export function HomePage() {
       setError("");
       setTopic(draft.topic);
       setNotes(draft.notes);
-      setLevel(draft.level);
-      setMinutes(draft.minutes);
+      setLevel(LEVELS.includes(draft.level as (typeof LEVELS)[number]) ? draft.level : "high");
+      setCustomLevel(LEVELS.includes(draft.level as (typeof LEVELS)[number]) ? "" : draft.level);
+      setLevelCustom(!LEVELS.includes(draft.level as (typeof LEVELS)[number]));
+      setMinutes(draft.minutes === 5 || draft.minutes === 10 || draft.minutes === 20 ? draft.minutes : 10);
+      setCustomMinutes(draft.minutes === 5 || draft.minutes === 10 || draft.minutes === 20 ? "" : String(draft.minutes));
+      setTimeCustom(!(draft.minutes === 5 || draft.minutes === 10 || draft.minutes === 20));
       const response = await fetch("/api/lessons/generate", {
         method: "POST",
         headers: jsonHeaders(),
@@ -71,7 +79,7 @@ export function HomePage() {
       sessionStorage.removeItem(DRAFT_KEY);
       return;
     }
-    if (!draft.topic || (draft.minutes !== 5 && draft.minutes !== 10 && draft.minutes !== 20) || typeof draft.notes !== "string") {
+    if (!draft.topic || typeof draft.notes !== "string" || typeof draft.level !== "string" || !Number.isInteger(draft.minutes)) {
       sessionStorage.removeItem(DRAFT_KEY);
       return;
     }
@@ -82,11 +90,21 @@ export function HomePage() {
   }, [createLesson, loading, user]);
 
   function submitPrompt() {
-    const draft: Draft = { topic: topic.trim(), level, minutes, notes: notes.trim() };
-    if (draft.topic.length < 2) {
+    const chosenLevel = (levelCustom ? customLevel : level).trim();
+    const chosenMinutes = timeCustom ? Number(customMinutes) : minutes;
+    if (topic.trim().length < 2) {
       setError("Add a topic.");
       return;
     }
+    if (chosenLevel.length < 2) {
+      setError("Add a level.");
+      return;
+    }
+    if (!Number.isInteger(chosenMinutes) || chosenMinutes < 5 || chosenMinutes > 120) {
+      setError("Use a length between 5 and 120 minutes.");
+      return;
+    }
+    const draft: Draft = { topic: topic.trim(), level: chosenLevel, minutes: chosenMinutes, notes: notes.trim() };
     if (loading) return;
     if (!user) {
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -124,38 +142,82 @@ export function HomePage() {
           <span className="text-sm text-muted">Notes</span>
           <textarea
             value={notes}
-            onChange={(event) => setNotes(event.target.value)}
+            onChange={(event) => {
+              setNotes(event.target.value);
+              const element = event.target;
+              element.style.height = "auto";
+              element.style.height = `${element.scrollHeight}px`;
+            }}
             placeholder="Spend extra time on the chain rule. The class already knows limits."
-            rows={4}
-            className="rounded-2xl border border-line bg-background px-4 py-3 outline-none focus:border-accent"
+            rows={3}
+            className="resize-none overflow-hidden rounded-2xl border border-line bg-background px-4 py-3 outline-none focus:border-accent"
           />
         </label>
         <fieldset className="flex flex-wrap gap-2">
           <legend className="mb-2 text-sm text-muted">Level</legend>
-          {(["middle", "high", "university"] as Level[]).map((option) => (
+          {LEVELS.map((option) => (
             <button
               key={option}
               type="button"
-              onClick={() => setLevel(option)}
-              className={`rounded-full px-3 py-1 text-sm ${level === option ? "bg-foreground text-paper" : "border border-line"}`}
+              onClick={() => {
+                setLevelCustom(false);
+                setLevel(option);
+              }}
+              className={`rounded-full px-3 py-1 text-sm ${!levelCustom && level === option ? "bg-foreground text-paper" : "border border-line"}`}
             >
               {option === "middle" ? "Middle school" : option === "high" ? "High school" : "University"}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setLevelCustom(true)}
+            className={`rounded-full px-3 py-1 text-sm ${levelCustom ? "bg-foreground text-paper" : "border border-line"}`}
+          >
+            Custom
+          </button>
         </fieldset>
+        {levelCustom ? (
+          <input
+            value={customLevel}
+            onChange={(event) => setCustomLevel(event.target.value)}
+            placeholder="AP Physics 1"
+            className="rounded-2xl border border-line bg-background px-4 py-2 outline-none focus:border-accent"
+          />
+        ) : null}
         <fieldset className="flex flex-wrap gap-2">
           <legend className="mb-2 text-sm text-muted">Suggested length</legend>
           {([5, 10, 20] as const).map((option) => (
             <button
               key={option}
               type="button"
-              onClick={() => setMinutes(option)}
-              className={`rounded-full px-3 py-1 text-sm ${minutes === option ? "bg-foreground text-paper" : "border border-line"}`}
+              onClick={() => {
+                setTimeCustom(false);
+                setMinutes(option);
+              }}
+              className={`rounded-full px-3 py-1 text-sm ${!timeCustom && minutes === option ? "bg-foreground text-paper" : "border border-line"}`}
             >
               {option} min
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setTimeCustom(true)}
+            className={`rounded-full px-3 py-1 text-sm ${timeCustom ? "bg-foreground text-paper" : "border border-line"}`}
+          >
+            Custom
+          </button>
         </fieldset>
+        {timeCustom ? (
+          <input
+            type="number"
+            min={5}
+            max={120}
+            value={customMinutes}
+            onChange={(event) => setCustomMinutes(event.target.value)}
+            placeholder="45"
+            className="w-32 rounded-2xl border border-line bg-background px-4 py-2 outline-none focus:border-accent"
+          />
+        ) : null}
         <p className="text-sm text-muted">The planner chooses the real length from your prompt.</p>
         <button type="submit" disabled={busy || loading} className="mt-2 w-fit rounded-full bg-accent px-5 py-2 text-paper disabled:opacity-60">
           {busy ? "Planning the sections…" : "Create lesson"}
