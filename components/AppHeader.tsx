@@ -37,9 +37,14 @@ export function AppHeader() {
               </button>
             </>
           ) : (
-            <Link href="/login" className="rounded-full bg-foreground px-3 py-1 text-paper">
-              Log in
-            </Link>
+            <>
+              <Link href="/signup" className="rounded-full border border-line px-3 py-1 hover:text-foreground">
+                Sign up
+              </Link>
+              <Link href="/login" className="rounded-full bg-foreground px-3 py-1 text-paper">
+                Log in
+              </Link>
+            </>
           )}
         </div>
       </div>

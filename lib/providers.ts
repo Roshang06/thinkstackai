@@ -1,6 +1,6 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { google } from "@ai-sdk/google";
-import { generateText, stepCountIs, tool, type LanguageModel } from "ai";
+import { generateText, tool, type LanguageModel } from "ai";
 import { z } from "zod";
 
 export type DocumentTool = {
@@ -83,11 +83,12 @@ function providers(): ModelProvider[] {
   const openrouterKey = configuredKey(readEnv(process.env, "OPENROUTER_API_KEY"));
   if (openrouterKey) {
     const client = createOpenRouter({ apiKey: openrouterKey });
-    const name = readEnv(process.env, "OPENROUTER_MODEL")?.trim() || "openai/gpt-4o-mini";
+    const requested = readEnv(process.env, "OPENROUTER_MODEL")?.trim() || "openai/gpt-4o-mini";
+    const names = requested === "openrouter/free" ? ["nvidia/nemotron-3-super-120b-a12b:free", requested] : [requested];
     list.push({
       kind: "sdk",
       label: "OpenRouter",
-      models: [{ name, model: client.chat(name) }],
+      models: names.map((name) => ({ name, model: client.chat(name, { reasoning: { max_tokens: 256 } }) })),
     });
   }
   if (configuredKey(readEnv(process.env, "BACKBOARD_API_KEY"))) list.push({ kind: "backboard", label: "Backboard" });
@@ -231,8 +232,8 @@ export async function runDocumentProviders(options: {
                 ]),
               ),
               toolChoice: "required",
-              stopWhen: stepCountIs(options.steps),
-              abortSignal: AbortSignal.timeout(45_000),
+              stopWhen: ({ steps }) => options.succeeded() || steps.length >= options.steps,
+              abortSignal: AbortSignal.timeout(55_000),
               system: options.system,
               prompt: options.prompt,
             });
@@ -242,7 +243,9 @@ export async function runDocumentProviders(options: {
           } catch (error) {
             modelError = error;
             console.error(`${provider.label} ${candidate.name} failed`, error instanceof Error ? error.message : error);
-            const retryModel = index < provider.models.length - 1 && (isOverloaded(error) || isMissingModel(error));
+            const retryModel =
+              index < provider.models.length - 1 &&
+              (isOverloaded(error) || isMissingModel(error) || /reasoning is mandatory|timeout|aborted/i.test(errorText(error)));
             if (!retryModel) break;
           }
         }

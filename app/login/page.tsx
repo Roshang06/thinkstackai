@@ -4,7 +4,7 @@ import { AuthPage } from "@/components/AuthPage";
 export default function Page() {
   return (
     <Suspense>
-      <AuthPage />
+      <AuthPage mode="login" />
     </Suspense>
   );
 }
