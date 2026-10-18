@@ -100,6 +100,7 @@ export type Lesson = {
   id: string;
   ownerId: string;
   ownerName: string;
+  institution: string;
   title: string;
   topic: string;
   level: Level;
@@ -119,6 +120,7 @@ export type LessonSummary = {
   id: string;
   ownerId: string;
   ownerName: string;
+  institution: string;
   title: string;
   topic: string;
   level: Level;
@@ -161,6 +163,7 @@ export type LessonDraftInput = {
   topic: string;
   level: Level;
   minutes: number;
+  notes?: string;
   ownerId: string;
   ownerName: string;
 };

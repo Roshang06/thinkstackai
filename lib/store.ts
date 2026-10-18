@@ -130,6 +130,7 @@ function toSummary(lesson: Lesson): LessonSummary {
     id: lesson.id,
     ownerId: lesson.ownerId,
     ownerName: lesson.ownerName,
+    institution: lesson.institution,
     title: lesson.title,
     topic: lesson.topic,
     level: lesson.level,
@@ -163,12 +164,16 @@ export async function listForOwner(ownerId: string): Promise<LessonSummary[]> {
   );
 }
 
-export async function searchPublic(query: string): Promise<LessonSummary[]> {
+export async function searchPublic(query: string, filters: { instructor?: string; institution?: string } = {}): Promise<LessonSummary[]> {
   const needle = query.trim().toLowerCase();
+  const instructor = filters.instructor?.trim().toLowerCase() ?? "";
+  const institution = filters.institution?.trim().toLowerCase() ?? "";
   const matches = (lesson: Lesson) => {
     if (lesson.visibility !== "public") return false;
+    if (instructor && !lesson.ownerName.toLowerCase().includes(instructor)) return false;
+    if (institution && !(lesson.institution ?? "").toLowerCase().includes(institution)) return false;
     if (!needle) return true;
-    const haystack = [lesson.title, lesson.topic, lesson.summary, lesson.ownerName, ...lesson.tags].join(" ").toLowerCase();
+    const haystack = [lesson.title, lesson.topic, lesson.summary, lesson.ownerName, lesson.institution ?? "", ...lesson.tags].join(" ").toLowerCase();
     return haystack.includes(needle);
   };
   if ((await activeStorage()) === "mongo") {

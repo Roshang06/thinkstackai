@@ -212,6 +212,7 @@ export function buildLesson(input: LessonDraftInput, id: string): { lesson: Less
     id,
     ownerId: input.ownerId,
     ownerName: input.ownerName,
+    institution: "",
     title,
     topic: input.topic.trim(),
     level: input.level,
@@ -238,6 +239,7 @@ export function seedLessons(): Lesson[] {
   const base = {
     ownerId: "community",
     ownerName: "Thinkstack",
+    institution: "Thinkstack",
     level: "high" as const,
     minutes: 10,
   };

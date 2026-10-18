@@ -65,5 +65,6 @@ export function normalizeLesson<T extends Partial<Lesson> & Pick<Lesson, "blocks
     blocks: flattenSections(sections),
     stage,
     activity: typeof lesson.activity === "string" ? lesson.activity.slice(0, 180) : "",
+    institution: typeof lesson.institution === "string" ? lesson.institution.slice(0, 120) : "",
   };
 }

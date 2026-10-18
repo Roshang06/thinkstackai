@@ -11,20 +11,22 @@ const LEVELS = new Set<Level>(["middle", "high", "university"]);
 export async function POST(request: Request) {
   const user = await readUser(request);
   if (!user) return jsonError("Sign in to create a lesson.", 401);
-  const body = (await request.json()) as { topic?: string; level?: Level; minutes?: number };
+  const body = (await request.json()) as { topic?: string; level?: Level; minutes?: number; notes?: string };
   const topic = body.topic?.trim() ?? "";
   if (topic.length < 2 || topic.length > 500) return jsonError("Add a topic", 400);
   if (!body.level || !LEVELS.has(body.level)) return jsonError("Choose a level", 400);
   if (body.minutes !== 5 && body.minutes !== 10 && body.minutes !== 20) return jsonError("Choose a length", 400);
 
   try {
-    const outline = await planLesson({ topic, level: body.level, minutes: body.minutes });
+    const notes = typeof body.notes === "string" ? body.notes.trim().slice(0, 1000) : "";
+    const outline = await planLesson({ topic, level: body.level, minutes: body.minutes, notes });
     const sections = draftSections(outline);
     const timestamp = new Date().toISOString();
     const lesson: Lesson = {
       id: crypto.randomUUID(),
       ownerId: user.id,
       ownerName: user.name,
+      institution: "",
       title: outline.title,
       topic,
       level: body.level,

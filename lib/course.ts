@@ -41,7 +41,7 @@ function words(value: string): number {
   return value.split(/\s+/).filter(Boolean).length;
 }
 
-export async function planLesson(input: { topic: string; level: Level; minutes: number }): Promise<LessonOutline> {
+export async function planLesson(input: { topic: string; level: Level; minutes: number; notes?: string }): Promise<LessonOutline> {
   const bounds = sectionBounds(input.minutes);
   let written: LessonOutline | null = null;
   await runDocumentProviders({
@@ -96,7 +96,7 @@ export async function planLesson(input: { topic: string; level: Level; minutes: 
       "Use an interaction when the learner should manipulate something. A math or science lesson needs one interaction, and never more than two. Do not put an interaction on every section. History and literature can leave every interaction empty.",
       "Do not put the rules of the game inside the objective.",
     ].join(" "),
-    prompt: `Prompt: ${input.topic}\nLevel: ${input.level}\nSuggested length: ${input.minutes} minutes`,
+    prompt: `Prompt: ${input.topic}\nLevel: ${input.level}\nSuggested length: ${input.minutes} minutes${input.notes?.trim() ? `\nInstructor notes: ${input.notes.trim().slice(0, 1000)}` : ""}`,
   });
   if (!written) throw new Error("The model did not plan the lesson");
   return written;

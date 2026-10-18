@@ -214,6 +214,7 @@ export async function generateLesson(input: LessonDraftInput): Promise<{ lesson:
     id: newId(),
     ownerId: input.ownerId,
     ownerName: input.ownerName,
+    institution: "",
     title: draft.title.slice(0, 140),
     topic: input.topic.trim(),
     level: input.level,

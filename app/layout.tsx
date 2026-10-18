@@ -16,7 +16,7 @@ const sans = Source_Sans_3({
 
 export const metadata: Metadata = {
   title: "Thinkstack",
-  description: "Study from a lesson document you and the model can edit.",
+  description: "Design lesson plans, manage students, and study with interactive lessons.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

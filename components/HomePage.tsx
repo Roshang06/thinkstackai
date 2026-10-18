@@ -1,14 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ProgressBar } from "./ProgressBar";
 import { jsonHeaders, useUser } from "./user";
-import type { LessonSummary, Level } from "@/lib/types";
+import type { Level } from "@/lib/types";
 
 type Status = { liveModel: boolean; storage: "file" | "mongo"; storageNote: string | null };
-type Draft = { topic: string; level: Level; minutes: 5 | 10 | 20 };
+type Draft = { topic: string; level: Level; minutes: 5 | 10 | 20; notes: string };
 
 const DRAFT_KEY = "thinkstack-draft";
 let draftStarted = false;
@@ -16,10 +14,9 @@ let draftStarted = false;
 export function HomePage() {
   const router = useRouter();
   const { user, loading } = useUser();
-  const [lessons, setLessons] = useState<LessonSummary[]>([]);
-  const [progress, setProgress] = useState<Record<string, string[]>>({});
   const [status, setStatus] = useState<Status | null>(null);
   const [topic, setTopic] = useState("");
+  const [notes, setNotes] = useState("");
   const [level, setLevel] = useState<Level>("high");
   const [minutes, setMinutes] = useState<5 | 10 | 20>(10);
   const [busy, setBusy] = useState(false);
@@ -29,20 +26,7 @@ export function HomePage() {
   const load = useCallback(async () => {
     const statusResponse = await fetch("/api/status");
     if (statusResponse.ok) setStatus((await statusResponse.json()) as Status);
-    if (!user) {
-      setLessons([]);
-      setProgress({});
-      return;
-    }
-    const response = await fetch("/api/lessons");
-    if (!response.ok) return;
-    const body = (await response.json()) as {
-      lessons: LessonSummary[];
-      progress: Record<string, string[]>;
-    };
-    setLessons(body.lessons);
-    setProgress(body.progress);
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -56,6 +40,7 @@ export function HomePage() {
       setBusy(true);
       setError("");
       setTopic(draft.topic);
+      setNotes(draft.notes);
       setLevel(draft.level);
       setMinutes(draft.minutes);
       const response = await fetch("/api/lessons/generate", {
@@ -86,7 +71,7 @@ export function HomePage() {
       sessionStorage.removeItem(DRAFT_KEY);
       return;
     }
-    if (!draft.topic || (draft.minutes !== 5 && draft.minutes !== 10 && draft.minutes !== 20)) {
+    if (!draft.topic || (draft.minutes !== 5 && draft.minutes !== 10 && draft.minutes !== 20) || typeof draft.notes !== "string") {
       sessionStorage.removeItem(DRAFT_KEY);
       return;
     }
@@ -97,7 +82,7 @@ export function HomePage() {
   }, [createLesson, loading, user]);
 
   function submitPrompt() {
-    const draft: Draft = { topic: topic.trim(), level, minutes };
+    const draft: Draft = { topic: topic.trim(), level, minutes, notes: notes.trim() };
     if (draft.topic.length < 2) {
       setError("Add a topic.");
       return;
@@ -112,15 +97,15 @@ export function HomePage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-12">
-      <h1 className="font-display text-5xl tracking-tight">What do you want to learn?</h1>
-      <p className="mt-3 max-w-xl text-lg text-muted">Describe a topic. Thinkstack writes a lesson you can read, edit, and check.</p>
+    <div className="mx-auto max-w-4xl px-5 py-16">
+      <h1 className="text-center font-display text-5xl tracking-tight sm:text-6xl">What should this lesson teach?</h1>
+      <p className="mx-auto mt-4 max-w-xl text-center text-lg text-muted">Describe the topic, then add any notes the planner should follow.</p>
       {status?.storageNote ? <p className="mt-4 text-sm text-muted">{status.storageNote}</p> : null}
       {status && !status.liveModel ? (
         <p className="mt-4 text-sm text-muted">Add an OpenRouter, Backboard, or Gemini API key for live lessons.</p>
       ) : null}
       <form
-        className="mt-8 grid gap-4"
+        className="mx-auto mt-10 grid w-full gap-5 rounded-3xl border border-line bg-paper p-6 shadow-sm sm:p-10"
         onSubmit={(event) => {
           event.preventDefault();
           submitPrompt();
@@ -132,7 +117,17 @@ export function HomePage() {
             value={topic}
             onChange={(event) => setTopic(event.target.value)}
             placeholder="How enzymes lower activation energy"
-            className="border-b border-line bg-transparent py-2 text-xl outline-none focus:border-accent"
+            className="rounded-2xl border border-line bg-background px-4 py-3 text-lg outline-none focus:border-accent"
+          />
+        </label>
+        <label className="grid gap-2">
+          <span className="text-sm text-muted">Notes</span>
+          <textarea
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Spend extra time on the chain rule. The class already knows limits."
+            rows={4}
+            className="rounded-2xl border border-line bg-background px-4 py-3 outline-none focus:border-accent"
           />
         </label>
         <fieldset className="flex flex-wrap gap-2">
@@ -166,29 +161,8 @@ export function HomePage() {
           {busy ? "Planning the sections…" : "Create lesson"}
         </button>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
-        {!loading && !user ? <p className="text-sm text-muted">You'll sign in before the lesson is created. Public lessons are in Explore.</p> : null}
+        {!loading && !user ? <p className="text-sm text-muted">You'll sign in before the lesson is created.</p> : null}
       </form>
-      {user ? (
-        <section className="mt-14">
-          <h2 className="font-display text-3xl">Your lessons</h2>
-          {lessons.length === 0 ? <p className="mt-3 text-muted">Nothing saved yet. Public examples are in Explore.</p> : null}
-          <ul className="mt-4 divide-y divide-line border-y border-line">
-            {lessons.map((lesson) => (
-              <li key={lesson.id}>
-                <Link href={`/lessons/${lesson.id}`} className="flex items-center justify-between gap-4 py-4">
-                  <span>
-                    <span className="block text-lg">{lesson.title}</span>
-                    <span className="text-sm text-muted">
-                      {lesson.stage === "drafting" ? "Writing sections" : lesson.visibility === "public" ? "Public" : "Private"} · {lesson.sectionCount} sections
-                    </span>
-                  </span>
-                  <ProgressBar completed={progress[lesson.id]?.length ?? 0} total={lesson.blockCount} />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
     </div>
   );
 }

@@ -219,6 +219,7 @@ test("an older lesson without sections still opens as one section", () => {
     createdAt: "2026-10-17T00:00:00.000Z",
     updatedAt: "2026-10-17T00:00:00.000Z",
   });
+  assert.equal(lesson.institution, "");
   assert.equal(lesson.sections.length, 1);
   assert.equal(lesson.sections[0]?.blocks.length, 1);
   assert.equal(lesson.stage, "ready");
