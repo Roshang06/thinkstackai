@@ -4,8 +4,9 @@ import { prose } from "./blocks";
 import { applyOfflineCommand, isBlock, progressPercent } from "./document";
 import { buildLesson, matchCurated, seedLessons } from "./offline";
 import { generationErrorMessage } from "./gemini";
-import { geminiModelNames, providerLabels } from "./providers";
-import { isPlaceholderCopy, normalizeBlock } from "./schema";
+import { backboardModels, geminiModelNames, providerLabels, specialistModel } from "./providers";
+import { attachArtifacts, isPlaceholderCopy, normalizeBlock } from "./schema";
+import type { Block } from "./types";
 
 test("curated topics match the hand-written lessons", () => {
   assert.equal(matchCurated("Fourier transform for beginners"), "fourier");
@@ -61,6 +62,34 @@ test("public seeds are readable lessons", () => {
   const seeds = seedLessons();
   assert.equal(seeds.length, 3);
   assert.ok(seeds.every((lesson) => lesson.visibility === "public" && lesson.blocks.every(isBlock)));
+});
+
+test("a written equation like y = x squared becomes a plottable expression", () => {
+  const block = normalizeBlock({
+    type: "graph",
+    heading: "",
+    body: "",
+    latex: "",
+    caption: "",
+    title: "Parabola",
+    expression: "y = x²",
+    xMin: -4,
+    xMax: 4,
+    yMin: 0,
+    yMax: 16,
+    prompt: "",
+    choices: [],
+    answerIndex: 0,
+    explanation: "",
+    accepted: [],
+    cards: [],
+    language: "javascript",
+    starter: "",
+    kind: "wave",
+    note: "",
+  });
+  assert.equal(block?.type, "graph");
+  if (block?.type === "graph") assert.equal(block.expression, "x^2");
 });
 
 test("model blocks with unsafe graph expressions are dropped", () => {
@@ -125,12 +154,27 @@ test("model providers are tried in order and blank keys are skipped", () => {
       BACKBOARD_API_KEY: "bb",
       GOOGLE_GENERATIVE_AI_API_KEY: "gem",
     }),
-    ["OpenRouter", "Backboard", "Gemini"],
+    ["Backboard", "OpenRouter", "Gemini"],
   );
   assert.deepEqual(providerLabels({ GOOGLE_GENERATIVE_AI_API_KEY: "gem" }), ["Gemini"]);
   assert.deepEqual(providerLabels({ OPENROUTER_API_KEY: "your-key" }), []);
   assert.deepEqual(providerLabels({ "OPENROUTER_API_KEY ": "sk-or" }), ["OpenRouter"]);
   assert.deepEqual(providerLabels({}), []);
+});
+
+test("backboard tries a strong model first and artifacts stay unique", () => {
+  assert.deepEqual(backboardModels({}), [
+    { provider: "openai", name: "gpt-4.1" },
+    { provider: "anthropic", name: "claude-sonnet-4-6" },
+    { provider: "openai", name: "gpt-4o-mini" },
+  ]);
+  assert.equal(specialistModel({}).provider, "anthropic");
+  assert.equal(backboardModels({ BACKBOARD_MODEL: "gpt-4.1" })[0].name, "gpt-4.1");
+  const prose = { id: "p", type: "prose", heading: "Note", body: "Text." } as Block;
+  const quiz = { id: "q", type: "quiz", prompt: "Which?", choices: ["a"], answerIndex: 0, explanation: "a" } as Block;
+  const graph = { id: "g", type: "graph", title: "Line", expression: "x", xMin: -1, xMax: 1, yMin: -1, yMax: 1 } as Block;
+  const merged = attachArtifacts([prose, quiz], [graph, graph]);
+  assert.deepEqual(merged.map((block) => block.type), ["prose", "graph", "quiz"]);
 });
 
 test("an overloaded Gemini model is followed by other flash models", () => {

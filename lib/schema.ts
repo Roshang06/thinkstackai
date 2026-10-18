@@ -49,9 +49,20 @@ export const editDraftSchema = z.object({
 });
 
 const SAFE_EXPR = /^[0-9xX+\-*/^().,\sA-Za-z]+$/;
+const SUPERSCRIPTS: Record<string, string> = { "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4", "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9" };
 
-function clip(value: string, max: number): string {
-  return value.trim().slice(0, max);
+function cleanExpression(value: unknown): string {
+  const rewritten = clip(value, 80)
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, (digit) => `^${SUPERSCRIPTS[digit] ?? ""}`)
+    .replace(/[×·]/g, "*")
+    .replace(/[−–]/g, "-")
+    .replace(/^[yY]\s*=\s*/, "");
+  const candidate = SAFE_EXPR.test(rewritten) ? rewritten : rewritten.replace(/[^0-9xX+\-*/^().,\sA-Za-z]/g, "");
+  return SAFE_EXPR.test(candidate) && /[xX]/.test(candidate) ? candidate : "";
+}
+
+function clip(value: unknown, max: number): string {
+  return String(value ?? "").trim().slice(0, max);
 }
 
 export function normalizeBlock(input: z.infer<typeof flatBlockSchema>): Block | null {
@@ -68,8 +79,8 @@ export function normalizeBlock(input: z.infer<typeof flatBlockSchema>): Block | 
       return { id, type: "equation", latex, caption: clip(input.caption || "", 400) };
     }
     case "graph": {
-      const expression = clip(input.expression || "sin(x)", 80);
-      if (!SAFE_EXPR.test(expression)) return null;
+      const expression = cleanExpression(input.expression);
+      if (!expression) return null;
       const xMin = input.xMin ?? -6;
       const xMax = input.xMax ?? 6;
       const yMin = input.yMin ?? -2;
@@ -117,13 +128,15 @@ export function normalizeBlock(input: z.infer<typeof flatBlockSchema>): Block | 
       return { id, type: "flashcards", title: clip(input.title || "Cards", 120), cards };
     }
     case "code": {
-      const starter = clip(input.starter ?? "", 2000);
+      const extra = input as { code?: unknown; source?: unknown };
+      const starter = clip(input.starter || extra.code || extra.source || "", 2000);
       if (!starter) return null;
+      const language = String(input.language ?? "javascript").toLowerCase() === "python" ? "python" : "javascript";
       return {
         id,
         type: "code",
         title: clip(input.title || "Try it", 120),
-        language: input.language ?? "javascript",
+        language,
         starter,
       };
     }
@@ -142,4 +155,39 @@ export function normalizeBlock(input: z.infer<typeof flatBlockSchema>): Block | 
 
 export function normalizeBlocks(inputs: z.infer<typeof flatBlockSchema>[]): Block[] {
   return inputs.map(normalizeBlock).filter((block): block is Block => block !== null);
+}
+
+function blockSignature(block: Block): string {
+  switch (block.type) {
+    case "graph":
+      return `graph:${block.expression}`;
+    case "equation":
+      return `equation:${block.latex}`;
+    case "code":
+      return `code:${block.starter}`;
+    case "quiz":
+      return `quiz:${block.prompt}`;
+    case "simulation":
+      return `simulation:${block.kind}:${block.note}`;
+    case "flashcards":
+      return `flashcards:${block.cards.map((card) => card.front).join("|")}`;
+    case "short_answer":
+      return `short_answer:${block.prompt}`;
+    case "prose":
+      return `prose:${block.heading}`;
+  }
+}
+
+export function attachArtifacts(blocks: Block[], artifacts: Block[]): Block[] {
+  const seen = new Set(blocks.map(blockSignature));
+  const next = [...blocks];
+  for (const artifact of artifacts) {
+    const key = blockSignature(artifact);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const quizAt = next.findIndex((block) => block.type === "quiz" || block.type === "short_answer");
+    if (quizAt >= 0) next.splice(quizAt, 0, artifact);
+    else next.push(artifact);
+  }
+  return next;
 }

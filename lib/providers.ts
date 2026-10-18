@@ -10,7 +10,7 @@ export type DocumentTool = {
 };
 
 type SdkProvider = { kind: "sdk"; label: string; models: { name: string; model: LanguageModel }[] };
-type BackboardProvider = { kind: "backboard"; label: "Backboard" };
+type BackboardProvider = { kind: "backboard"; label: "Backboard"; models: BackboardModel[] };
 type ModelProvider = SdkProvider | BackboardProvider;
 
 const GEMINI_ALTERNATES = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
@@ -31,10 +31,38 @@ function configuredKey(value: string | undefined): string | null {
   return key;
 }
 
+export type BackboardModel = { provider: string; name: string };
+
+const BACKBOARD_DEFAULTS: BackboardModel[] = [
+  { provider: "openai", name: "gpt-4.1" },
+  { provider: "anthropic", name: "claude-sonnet-4-6" },
+  { provider: "openai", name: "gpt-4o-mini" },
+];
+
+export function backboardModels(env: Record<string, string | undefined> = process.env): BackboardModel[] {
+  const provider = readEnv(env, "BACKBOARD_PROVIDER")?.trim();
+  const name = readEnv(env, "BACKBOARD_MODEL")?.trim();
+  const preferred = provider || name ? [{ provider: provider || "openai", name: name || "gpt-4.1" }] : [];
+  const seen = new Set<string>();
+  const models: BackboardModel[] = [];
+  for (const model of [...preferred, ...BACKBOARD_DEFAULTS]) {
+    const key = `${model.provider}/${model.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    models.push(model);
+  }
+  return models;
+}
+
+export function specialistModel(env: Record<string, string | undefined> = process.env): BackboardModel {
+  const models = backboardModels(env);
+  return models.find((model) => model.provider === "anthropic") ?? models[0];
+}
+
 export function providerLabels(env: Record<string, string | undefined> = process.env): string[] {
   const labels: string[] = [];
-  if (configuredKey(readEnv(env, "OPENROUTER_API_KEY"))) labels.push("OpenRouter");
   if (configuredKey(readEnv(env, "BACKBOARD_API_KEY"))) labels.push("Backboard");
+  if (configuredKey(readEnv(env, "OPENROUTER_API_KEY"))) labels.push("OpenRouter");
   if (configuredKey(readEnv(env, "GOOGLE_GENERATIVE_AI_API_KEY"))) labels.push("Gemini");
   return labels;
 }
@@ -80,6 +108,9 @@ export function geminiModelNames(env: Record<string, string | undefined> = proce
 
 function providers(): ModelProvider[] {
   const list: ModelProvider[] = [];
+  if (configuredKey(readEnv(process.env, "BACKBOARD_API_KEY"))) {
+    list.push({ kind: "backboard", label: "Backboard", models: backboardModels() });
+  }
   const openrouterKey = configuredKey(readEnv(process.env, "OPENROUTER_API_KEY"));
   if (openrouterKey) {
     const client = createOpenRouter({ apiKey: openrouterKey });
@@ -91,7 +122,6 @@ function providers(): ModelProvider[] {
       models: names.map((name) => ({ name, model: client.chat(name, { reasoning: { max_tokens: 256 } }) })),
     });
   }
-  if (configuredKey(readEnv(process.env, "BACKBOARD_API_KEY"))) list.push({ kind: "backboard", label: "Backboard" });
   if (configuredKey(readEnv(process.env, "GOOGLE_GENERATIVE_AI_API_KEY"))) {
     list.push({
       kind: "sdk",
@@ -148,12 +178,15 @@ function callArguments(call: BackboardCall): Record<string, unknown> {
   }
 }
 
-async function runBackboard(options: {
-  system: string;
-  prompt: string;
-  tools: Record<string, DocumentTool>;
-  steps: number;
-}): Promise<void> {
+async function runBackboard(
+  options: {
+    system: string;
+    prompt: string;
+    tools: Record<string, DocumentTool>;
+    steps: number;
+  },
+  model: BackboardModel,
+): Promise<void> {
   const tools = Object.entries(options.tools).map(([name, definition]) => ({
     type: "function",
     function: {
@@ -166,10 +199,11 @@ async function runBackboard(options: {
     content: options.prompt,
     system_prompt: options.system,
     tools,
+    tool_choice: "required",
     stream: false,
     memory: "off",
-    llm_provider: readEnv(process.env, "BACKBOARD_PROVIDER")?.trim() || "openai",
-    model_name: readEnv(process.env, "BACKBOARD_MODEL")?.trim() || "gpt-4o-mini",
+    llm_provider: model.provider,
+    model_name: model.name,
   });
 
   for (let step = 0; step < options.steps; step += 1) {
@@ -196,6 +230,45 @@ async function runBackboard(options: {
       stream: false,
     });
   }
+}
+
+export async function runSpecialist(options: {
+  system: string;
+  prompt: string;
+  toolName: string;
+  inputSchema: z.ZodType;
+}): Promise<Record<string, unknown> | null> {
+  if (!configuredKey(readEnv(process.env, "BACKBOARD_API_KEY"))) return null;
+  const first = specialistModel();
+  const models = [first, ...backboardModels().filter((model) => model.provider !== first.provider || model.name !== first.name)];
+  let captured: Record<string, unknown> | null = null;
+  for (const model of models) {
+    captured = null;
+    try {
+      await runBackboard(
+        {
+          system: options.system,
+          prompt: options.prompt,
+          steps: 2,
+          tools: {
+            [options.toolName]: {
+              description: "Return the finished block.",
+              inputSchema: options.inputSchema,
+              execute: (input) => {
+                captured = input;
+                return { ok: true };
+              },
+            },
+          },
+        },
+        model,
+      );
+      if (captured) return captured;
+    } catch (error) {
+      console.error(`Backboard specialist ${model.provider}/${model.name} failed`, error instanceof Error ? error.message : error);
+    }
+  }
+  return null;
 }
 
 export async function runDocumentProviders(options: {
@@ -252,10 +325,23 @@ export async function runDocumentProviders(options: {
         last = modelError;
         continue;
       } else {
-        await runBackboard(options);
+        let modelError: unknown;
+        for (let index = 0; index < provider.models.length; index += 1) {
+          const candidate = provider.models[index];
+          options.reset();
+          try {
+            await runBackboard(options, candidate);
+            if (options.succeeded()) return;
+            modelError = new Error(`${provider.label} ${candidate.provider}/${candidate.name} did not change the document`);
+          } catch (error) {
+            modelError = error;
+            console.error(`${provider.label} ${candidate.provider}/${candidate.name} failed`, error instanceof Error ? error.message : error);
+            if (index === provider.models.length - 1) break;
+          }
+        }
+        last = modelError;
+        continue;
       }
-      if (options.succeeded()) return;
-      last = new Error(`${provider.label} did not change the document`);
     } catch (error) {
       last = error;
       console.error(`${provider.label} failed`, error instanceof Error ? error.message : error);
