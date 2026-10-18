@@ -6,7 +6,7 @@ import { buildLesson, matchCurated, seedLessons } from "./offline";
 import { generationErrorMessage } from "./gemini";
 import { backboardModels, geminiModelNames, providerLabels, specialistModel } from "./providers";
 import { attachArtifacts, isPlaceholderCopy, normalizeBlock } from "./schema";
-import { minutesForSections, normalizeLesson, sectionBounds, sectionCount } from "./sections";
+import { insertProse, minutesForSections, normalizeLesson, sectionBounds, sectionCount } from "./sections";
 import { sandboxDocument } from "./widget";
 import type { Block } from "./types";
 
@@ -230,6 +230,29 @@ test("a widget document cannot load an outside script", () => {
   assert.equal(html?.includes("evil.example"), false);
   assert.match(html ?? "", /script-src 'unsafe-inline'/);
   assert.match(html ?? "", /dataset\.ready/);
+});
+
+test("a requested subsection is inserted after the highlighted block", () => {
+  const sections = [
+    {
+      id: "s2",
+      title: "Scheduling",
+      objective: "How a project is ordered.",
+      interaction: "",
+      blocks: [prose("Tasks", "A schedule lists the tasks that have to finish before others can start.")],
+    },
+  ];
+  const highlighted = sections[0]?.blocks[0]?.id ?? "";
+  const next = insertProse(sections, {
+    sectionId: "s2",
+    afterBlockId: highlighted,
+    heading: "Critical path",
+    body: "The critical path is the longest chain of dependent tasks. Delaying any task on it delays the whole project.",
+  });
+  assert.equal(next?.[0]?.blocks.length, 2);
+  assert.equal(next?.[0]?.blocks[1]?.type, "prose");
+  if (next?.[0]?.blocks[1]?.type === "prose") assert.match(next[0].blocks[1].heading, /Critical path/);
+  assert.equal(insertProse(sections, { sectionId: "missing", afterBlockId: highlighted, heading: "No", body: "Too short to count as a paragraph for the reader." }), null);
 });
 
 test("progress percent rounds", () => {

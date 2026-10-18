@@ -25,17 +25,20 @@ export async function POST(request: Request, context: Context) {
       instruction,
       selection: body.selection?.slice(0, 500),
       visibleSectionId: body.sectionId,
+      highlightedBlockId: body.blockId,
     });
-    const saved = await saveLesson(id, user.id, {
-      sections: edited.sections,
-      minutes: edited.minutes,
-      title: edited.title,
-      summary: edited.summary,
-      tags: edited.tags,
-    });
+    const saved = edited.changedDocument
+      ? await saveLesson(id, user.id, {
+          sections: edited.sections,
+          minutes: edited.minutes,
+          title: edited.title,
+          summary: edited.summary,
+          tags: edited.tags,
+        })
+      : lesson;
     if (!saved) return jsonError("Could not update the lesson", 400);
     await addMessage(id, "user", instruction);
-    const message = await addMessage(id, "model", edited.status);
+    const message = await addMessage(id, "model", edited.reply);
     return Response.json({ lesson: saved, message });
   } catch (error) {
     console.error("Lesson edit failed", error instanceof Error ? error.message : error);

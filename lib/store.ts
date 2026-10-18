@@ -215,7 +215,7 @@ export async function addMessage(lessonId: string, role: "user" | "model", text:
     id: crypto.randomUUID(),
     lessonId,
     role,
-    text: text.slice(0, 500),
+    text: text.slice(0, 2000),
     createdAt: new Date().toISOString(),
   };
   if ((await activeStorage()) === "mongo") {

@@ -40,24 +40,63 @@ const LABELS: Record<Block["type"], string> = {
   widget: "Interaction",
 };
 
+function RichText({ text }: { text: string }) {
+  const chunks = text.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
+  return (
+    <div className="space-y-4 text-lg leading-8">
+      {chunks.map((chunk, index) => {
+        if (chunk.startsWith("$$") && chunk.endsWith("$$")) {
+          const html = katex.renderToString(chunk.slice(2, -2), { throwOnError: false, displayMode: true });
+          return <div key={index} className="overflow-x-auto py-2" dangerouslySetInnerHTML={{ __html: html }} />;
+        }
+        if (chunk.startsWith("$") && chunk.endsWith("$")) {
+          const html = katex.renderToString(chunk.slice(1, -1), { throwOnError: false, displayMode: false });
+          return <span key={index} dangerouslySetInnerHTML={{ __html: html }} />;
+        }
+        return chunk.split(/\n\n+/).filter(Boolean).map((paragraph, paragraphIndex) => <p key={`${index}-${paragraphIndex}`}>{paragraph}</p>);
+      })}
+    </div>
+  );
+}
+
+function AutoText({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      rows={1}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full resize-none overflow-hidden bg-transparent text-lg leading-8 outline-none"
+    />
+  );
+}
+
 export function BlockView(props: BlockProps) {
   const { block } = props;
+  const quiet = block.type === "prose" || block.type === "equation";
   return (
     <article
       data-block-id={block.id}
       onClick={props.onSelect}
-      className={`scroll-mt-24 border-b border-line py-8 ${props.selected ? "bg-accent-soft/40" : ""}`}
+      className={`scroll-mt-24 ${quiet ? "py-4" : "border-t border-line py-8"} ${props.selected && !quiet ? "bg-accent-soft/40" : ""}`}
     >
-      <div className="mb-3 flex items-baseline justify-between gap-3">
-        <p className="text-xs tracking-wide text-muted uppercase">
-          {String(props.index + 1).padStart(2, "0")} {LABELS[block.type]}
-        </p>
-        {props.canEdit ? (
-          <button type="button" onClick={props.onRemove} className="text-xs text-muted hover:text-danger">
-            Remove
-          </button>
-        ) : null}
-      </div>
+      {quiet ? null : (
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <p className="text-xs tracking-wide text-muted uppercase">{LABELS[block.type]}</p>
+          {props.canEdit ? (
+            <button type="button" onClick={props.onRemove} className="text-xs text-muted hover:text-danger">
+              Remove
+            </button>
+          ) : null}
+        </div>
+      )}
       {block.type === "prose" ? <ProseView {...props} block={block} /> : null}
       {block.type === "equation" ? <EquationView {...props} block={block} /> : null}
       {block.type === "graph" ? <GraphView {...props} block={block} /> : null}
@@ -84,20 +123,7 @@ function ProseView({ block, canEdit, onChange, onComplete }: BlockProps & { bloc
       ) : (
         <h2 className="mb-3 font-display text-3xl">{block.heading}</h2>
       )}
-      {canEdit ? (
-        <textarea
-          value={block.body}
-          onChange={(event) => onChange({ ...block, body: event.target.value })}
-          rows={Math.max(4, block.body.split("\n").length + 1)}
-          className="w-full resize-y bg-transparent text-lg leading-8 outline-none"
-        />
-      ) : (
-        <div className="space-y-4 text-lg leading-8">
-          {block.body.split(/\n\n+/).map((paragraph, index) => (
-            <p key={`${block.id}-${index}`}>{paragraph}</p>
-          ))}
-        </div>
-      )}
+      {canEdit ? <AutoText value={block.body} onChange={(body) => onChange({ ...block, body })} /> : <RichText text={block.body} />}
     </div>
   );
 }
@@ -168,30 +194,28 @@ function GraphView({ block, canEdit, onChange, onComplete }: BlockProps & { bloc
 }
 
 function QuizView({ block, onComplete }: BlockProps & { block: QuizBlock }) {
-  const [choice, setChoice] = useState<number | null>(null);
-  const answered = choice !== null;
+  const [wrong, setWrong] = useState<number[]>([]);
+  const [solved, setSolved] = useState(false);
   return (
     <div>
       <h2 className="mb-4 font-display text-3xl">{block.prompt}</h2>
       <div className="grid gap-2">
         {block.choices.map((option, index) => {
           const correct = index === block.answerIndex;
-          const picked = index === choice;
+          const missed = wrong.includes(index);
           return (
             <button
               key={`${block.id}-${index}`}
               type="button"
-              disabled={answered}
+              disabled={solved || missed}
               onClick={() => {
-                setChoice(index);
-                if (correct) onComplete();
+                if (correct) {
+                  setSolved(true);
+                  onComplete();
+                } else setWrong((current) => [...current, index]);
               }}
               className={`rounded-md border px-4 py-3 text-left ${
-                answered && correct
-                  ? "border-accent bg-accent-soft"
-                  : picked
-                    ? "border-danger"
-                    : "border-line hover:border-foreground"
+                solved && correct ? "border-accent bg-accent-soft" : missed ? "border-danger bg-[#f8e8e6] text-danger" : "border-line hover:border-foreground"
               }`}
             >
               {option}
@@ -199,7 +223,7 @@ function QuizView({ block, onComplete }: BlockProps & { block: QuizBlock }) {
           );
         })}
       </div>
-      {answered ? <p className="mt-4 text-muted">{block.explanation}</p> : null}
+      {solved ? <p className="mt-4 text-muted">{block.explanation}</p> : null}
     </div>
   );
 }

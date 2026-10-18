@@ -1,3 +1,4 @@
+import { prose } from "./blocks";
 import { isBlock } from "./document";
 import type { Block, Lesson, LessonSection, LessonStage } from "./types";
 
@@ -18,9 +19,24 @@ export function minutesForSections(count: number): number {
 }
 
 export function proseDepth(minutes: number): { parts: number; words: number } {
-  if (minutes >= 20) return { parts: 3, words: 150 };
-  if (minutes <= 5) return { parts: 2, words: 80 };
-  return { parts: 3, words: 110 };
+  if (minutes >= 20) return { parts: 3, words: 420 };
+  if (minutes <= 5) return { parts: 2, words: 240 };
+  return { parts: 3, words: 320 };
+}
+
+export function insertProse(
+  sections: LessonSection[],
+  input: { sectionId: string; afterBlockId: string; heading: string; body: string },
+): LessonSection[] | null {
+  const index = sections.findIndex((section) => section.id === input.sectionId);
+  const heading = input.heading.trim();
+  const body = input.body.trim();
+  if (index < 0 || heading.length < 2 || body.length < 40) return null;
+  const section = sections[index];
+  const at = section.blocks.findIndex((block) => block.id === input.afterBlockId);
+  const blocks = [...section.blocks];
+  blocks.splice(at >= 0 ? at + 1 : blocks.length, 0, prose(heading, body));
+  return sections.map((item, itemIndex) => (itemIndex === index ? { ...section, blocks } : item));
 }
 
 export function flattenSections(sections: LessonSection[]): Block[] {

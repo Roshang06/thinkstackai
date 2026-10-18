@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { equation, newId, prose, quiz } from "./blocks";
 import { runDocumentProviders, runSpecialist } from "./providers";
-import { minutesForSections, proseDepth, sectionBounds } from "./sections";
+import { insertProse, minutesForSections, proseDepth, sectionBounds } from "./sections";
 import type { Block, Lesson, LessonSection, Level, WidgetBlock } from "./types";
 import { sandboxDocument, widgetFallback } from "./widget";
 
@@ -172,9 +172,9 @@ export async function writeSection(input: {
     system: [
       "Call write_section once. A prose reply is a failure.",
       `This is only the section “${input.section.title}” of a longer lesson. Do not summarize the other sections.`,
-      `Write ${depth.parts} parts. Each body is about ${depth.words} words of real explanation at ${input.level} level, in paragraphs, not an outline.`,
+      `Write ${depth.parts} parts. Each body is about ${depth.words} words, in several paragraphs under that one heading. Do not add a new heading for every sentence.`,
+      "Put a formula in the paragraph between dollar signs, like $y = x^2$. Leave equationLatex empty unless you could not place the formula in the text.",
       "checkPrompt is one 4-choice quiz about this section. answerIndex is 0, 1, 2, or 3.",
-      "equationLatex is display math for a formula that matters, or an empty string. Do not put code, a plot, or a game inside a part.",
       input.section.interaction
         ? "A specialist is building a playable interaction from a separate brief. Teach the idea, and do not describe the game's controls."
         : "This section has no interaction.",
@@ -190,8 +190,11 @@ export async function writeSection(input: {
   });
 
   if (!accepted) throw new Error("The model did not write this section");
-  const blocks: Block[] = parts.map((part) => prose(part.heading || input.section.title, part.body));
-  if (formula.latex) blocks.push(equation(formula.latex, formula.caption));
+  const blocks: Block[] = parts.map((part, index) => {
+    const math = index === 0 && formula.latex ? `\n\n$$${formula.latex}$$` : "";
+    const note = index === 0 && formula.caption ? `\n\n${formula.caption}` : "";
+    return prose(part.heading || input.section.title, `${part.body}${math}${note}`);
+  });
   if (input.section.interaction) {
     blocks.push({
       id: newId(),
@@ -251,32 +254,68 @@ export type LessonEdit = {
   tags: string[];
   minutes: number;
   status: string;
+  reply: string;
+  changedDocument: boolean;
 };
 
-export async function editCourse(lesson: Lesson, input: { instruction: string; selection?: string | null; visibleSectionId?: string | null }): Promise<LessonEdit> {
+export async function editCourse(
+  lesson: Lesson,
+  input: { instruction: string; selection?: string | null; visibleSectionId?: string | null; highlightedBlockId?: string | null },
+): Promise<LessonEdit> {
+  const copySections = () => lesson.sections.map((section) => ({ ...section, blocks: section.blocks.map((block) => ({ ...block })) }));
   const state: LessonEdit = {
-    sections: lesson.sections.map((section) => ({ ...section, blocks: section.blocks.map((block) => ({ ...block })) })),
+    sections: copySections(),
     title: lesson.title,
     summary: lesson.summary,
     tags: lesson.tags,
     minutes: lesson.minutes,
     status: "",
+    reply: "",
+    changedDocument: false,
   };
-  let changed = false;
 
   await runDocumentProviders({
     steps: 4,
     reset: () => {
-      state.sections = lesson.sections.map((section) => ({ ...section, blocks: section.blocks.map((block) => ({ ...block })) }));
+      state.sections = copySections();
       state.title = lesson.title;
       state.summary = lesson.summary;
       state.tags = lesson.tags;
       state.minutes = lesson.minutes;
       state.status = "";
-      changed = false;
+      state.reply = "";
+      state.changedDocument = false;
     },
-    succeeded: () => changed,
+    succeeded: () => state.reply.trim().length > 1,
     tools: {
+      say: {
+        description: "Send the chat reply. Call this on every turn, after any edit.",
+        inputSchema: z.object({ message: z.string() }),
+        execute: (raw) => {
+          const message = text((raw as { message?: string }).message);
+          if (message.split(/\s+/).length < 3) return { ok: false, error: "Write a full sentence for the chat." };
+          state.reply = message.slice(0, 800);
+          state.status = state.reply;
+          return { ok: true };
+        },
+      },
+      insert_prose: {
+        description: "Insert one headed explanation into a section, after afterBlockId.",
+        inputSchema: z.object({ sectionId: z.string(), afterBlockId: z.string(), heading: z.string(), body: z.string() }),
+        execute: (raw) => {
+          const request = raw as { sectionId?: string; afterBlockId?: string; heading?: string; body?: string };
+          const next = insertProse(state.sections, {
+            sectionId: text(request.sectionId) || text(input.visibleSectionId),
+            afterBlockId: text(request.afterBlockId) || text(input.highlightedBlockId),
+            heading: text(request.heading),
+            body: text(request.body),
+          });
+          if (!next) return { ok: false, error: "Name the section id and write a heading plus a paragraph of at least 40 characters." };
+          state.sections = next;
+          state.changedDocument = true;
+          return { ok: true };
+        },
+      },
       patch_prose: {
         description: "Rewrite one prose block in any section.",
         inputSchema: z.object({ status: z.string(), sectionId: z.string(), blockId: z.string(), heading: z.string(), body: z.string() }),
@@ -292,7 +331,7 @@ export async function editCourse(lesson: Lesson, input: { instruction: string; s
           if (current.type !== "prose") return { ok: false, error: "That block is not prose." };
           section.blocks[index] = { ...current, heading: text(request.heading).slice(0, 120) || current.heading, body: body.slice(0, 4000) };
           state.status = text(request.status).slice(0, 180) || "Updated a paragraph.";
-          changed = true;
+          state.changedDocument = true;
           return { ok: true };
         },
       },
@@ -339,7 +378,7 @@ export async function editCourse(lesson: Lesson, input: { instruction: string; s
           else state.sections = [...state.sections, next];
           state.minutes = minutesForSections(state.sections.length);
           state.status = text(record.status).slice(0, 180) || (previous ? `Updated ${next.title}.` : `Added ${next.title}.`);
-          changed = true;
+          state.changedDocument = true;
           return { ok: true, sectionId: next.id };
         },
       },
@@ -354,17 +393,17 @@ export async function editCourse(lesson: Lesson, input: { instruction: string; s
           state.sections = next;
           state.minutes = minutesForSections(next.length);
           state.status = text(request.status).slice(0, 180) || "Removed a section.";
-          changed = true;
+          state.changedDocument = true;
           return { ok: true };
         },
       },
     },
     system: [
-      "Call a tool. A prose reply is a failure.",
-      "The learner can see every section. Change any section the instruction names, not only the one on screen.",
-      "Use patch_prose for a wording change. Use replace_section to rewrite or add a section. Use delete_section to remove one.",
-      "An empty sectionId on replace_section appends a new section. Copy an interaction brief forward when you are not replacing that game.",
-      "Do not add a game to a history or literature section unless the learner asked for one.",
+      "Call say once on every turn. The message is the chat reply: one or two sentences. Never reply with a single word such as complete, draft, or a school level.",
+      "If the learner asks where something is, call say and do not edit.",
+      "If they ask to add a topic inside a section, call insert_prose with that section id and the highlighted block id, then call say and name the heading you added.",
+      "Use replace_section only to rewrite a whole page or append a new page. Use delete_section to remove a page.",
+      "Do not add a game unless the learner asked for one.",
     ].join(" "),
     prompt: JSON.stringify({
       title: lesson.title,
@@ -374,6 +413,7 @@ export async function editCourse(lesson: Lesson, input: { instruction: string; s
       instruction: input.instruction,
       selection: input.selection ?? "",
       visibleSectionId: input.visibleSectionId ?? "",
+      highlightedBlockId: input.highlightedBlockId ?? "",
       sections: state.sections.map((section) => ({
         id: section.id,
         title: section.title,
@@ -395,9 +435,11 @@ export async function editCourse(lesson: Lesson, input: { instruction: string; s
     }),
   });
 
-  if (!changed) throw new Error("The model did not edit the document");
+  if (!state.reply.trim()) throw new Error("The model did not reply");
+  if (!state.changedDocument) return state;
+  const previousIds = new Set(lesson.sections.flatMap((section) => section.blocks.map((block) => block.id)));
   for (const section of state.sections) {
-    const pending = section.blocks.find((block) => block.type === "widget" && !block.html.trim());
+    const pending = section.blocks.find((block) => block.type === "widget" && !block.html.trim() && !previousIds.has(block.id));
     if (!pending || pending.type !== "widget") continue;
     const built = await buildWidget({ topic: lesson.topic, level: lesson.level, title: section.title, brief: pending.brief });
     section.blocks = section.blocks.map((block) => (block.id === pending.id ? { ...built, id: pending.id } : block));

@@ -373,19 +373,20 @@ export function LessonStudio() {
       </main>
 
       {editorOpen && canEdit ? (
-        <aside className="fixed inset-y-0 right-0 z-20 flex w-full max-w-md flex-col border-l border-line bg-paper p-4 shadow-xl">
-          <div className="flex items-center justify-between">
-            <h2 className="font-display text-2xl">Edit the lesson</h2>
+        <aside className="fixed inset-y-0 right-0 z-20 flex w-full max-w-md flex-col border-l border-line bg-paper shadow-xl">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <div>
+              <h2 className="font-display text-2xl">Tutor</h2>
+              <p className="text-sm text-muted">Talk about the whole lesson. You are on {section?.title ?? "this page"}.</p>
+            </div>
             <button type="button" onClick={() => setEditorOpen(false)} className="text-sm text-muted">
               Close
             </button>
           </div>
-          <p className="mt-1 text-sm text-muted">Ask for a change in any section. You are viewing {section?.title ?? "the lesson"}.</p>
-          <ol className="mt-4 min-h-0 flex-1 space-y-3 overflow-auto text-sm">
-            {messages.length === 0 ? <li className="text-muted">No edits yet.</li> : null}
+          <ol className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-4">
+            {messages.length === 0 ? <li className="text-sm text-muted">Ask for a change, or ask where something went.</li> : null}
             {messages.map((message) => (
-              <li key={message.id}>
-                <span className="text-muted">{message.role === "user" ? "You" : "Thinkstack"} · </span>
+              <li key={message.id} className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm leading-6 ${message.role === "user" ? "ml-auto bg-accent text-paper" : "bg-background"}`}>
                 {message.text}
               </li>
             ))}
@@ -394,7 +395,7 @@ export function LessonStudio() {
             <p className="mt-4 text-sm text-muted">You can edit when the sections finish.</p>
           ) : (
             <form
-              className="mt-4 grid gap-2"
+              className="grid gap-2 border-t border-line px-4 py-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 void sendInstruction();
@@ -411,7 +412,7 @@ export function LessonStudio() {
               <textarea
                 value={instruction}
                 onChange={(event) => setInstruction(event.target.value)}
-                placeholder="Add a section on the chain rule and shorten the introduction"
+                placeholder="Add a part about the critical path after the highlighted text"
                 rows={4}
                 className="w-full resize-none border border-line bg-background px-3 py-2 text-sm outline-none focus:border-accent"
               />
@@ -420,7 +421,7 @@ export function LessonStudio() {
                   Use selection
                 </button>
                 <button type="submit" disabled={busy} className="rounded-full bg-accent px-3 py-2 text-sm text-paper disabled:opacity-60">
-                  {busy ? "Editing…" : "Apply"}
+                  {busy ? "Thinking…" : "Send"}
                 </button>
               </div>
             </form>
