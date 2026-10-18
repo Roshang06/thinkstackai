@@ -27,6 +27,9 @@ export function AppHeader() {
           <Link href="/library" className="hover:text-foreground">
             Your lessons
           </Link>
+          <Link href="/courses" className="hover:text-foreground">
+            Courses
+          </Link>
           <Link href="/explore" className="hover:text-foreground">
             Explore
           </Link>

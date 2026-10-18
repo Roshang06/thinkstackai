@@ -1,6 +1,6 @@
 import { isBlock } from "@/lib/document";
 import { jsonError, readUser } from "@/lib/http";
-import { deleteLesson, getLesson, lessonReadable, listMessages, progressFor, saveLesson } from "@/lib/store";
+import { deleteLesson, getLesson, lessonReadable, lessonSharedThroughCourse, listMessages, progressFor, saveLesson } from "@/lib/store";
 import type { Block } from "@/lib/types";
 
 type Context = { params: Promise<{ id: string }> };
@@ -9,7 +9,8 @@ export async function GET(request: Request, context: Context) {
   const user = await readUser(request);
   const { id } = await context.params;
   const lesson = await getLesson(id);
-  if (!lesson || !lessonReadable(lesson, user?.id ?? null)) return jsonError("Lesson not found", 404);
+  const shared = lesson ? await lessonSharedThroughCourse(lesson.id, user?.id ?? null) : false;
+  if (!lesson || (!lessonReadable(lesson, user?.id ?? null) && !shared)) return jsonError("Lesson not found", 404);
   const messages = user && lesson.ownerId === user.id ? await listMessages(id) : [];
   const progress = user ? await progressFor(user.id, [id]) : {};
   return Response.json({

@@ -6,13 +6,16 @@ import { flattenSections, normalizeLesson } from "./sections";
 import { isBlock } from "./document";
 import { seedLessons } from "./offline";
 import { profileFromAccount } from "./profile";
-import type { Account, Block, ChatMessage, Lesson, LessonSummary, Profile, Progress, Role } from "./types";
+import { toSummary } from "./summary";
+import type { Account, Block, ChatMessage, Course, Enrollment, Lesson, LessonSummary, Profile, Progress, Role } from "./types";
 
 type DatabaseShape = {
   lessons: Lesson[];
   progress: Progress[];
   messages: ChatMessage[];
   users: Account[];
+  courses: Course[];
+  enrollments: Enrollment[];
 };
 
 const FILE = path.join(process.cwd(), ".data", "store.json");
@@ -57,7 +60,7 @@ export function storageNotice(): string | null {
 }
 
 function emptyDb(): DatabaseShape {
-  return { lessons: seedLessons(), progress: [], messages: [], users: [] };
+  return { lessons: seedLessons(), progress: [], messages: [], users: [], courses: [], enrollments: [] };
 }
 
 async function readDb(): Promise<DatabaseShape> {
@@ -66,6 +69,8 @@ async function readDb(): Promise<DatabaseShape> {
     const parsed = JSON.parse(raw) as DatabaseShape;
     if (!Array.isArray(parsed.lessons)) return emptyDb();
     if (!Array.isArray(parsed.users)) parsed.users = [];
+    if (!Array.isArray(parsed.courses)) parsed.courses = [];
+    if (!Array.isArray(parsed.enrollments)) parsed.enrollments = [];
     return parsed;
   } catch {
     return emptyDb();
@@ -124,27 +129,6 @@ function cleanMessage(message: ChatMessage): ChatMessage {
   const copy = { ...message } as ChatMessage & { _id?: unknown };
   delete copy._id;
   return copy;
-}
-
-function toSummary(lesson: Lesson): LessonSummary {
-  return {
-    id: lesson.id,
-    ownerId: lesson.ownerId,
-    ownerName: lesson.ownerName,
-    institution: lesson.institution,
-    title: lesson.title,
-    topic: lesson.topic,
-    level: lesson.level,
-    minutes: lesson.minutes,
-    tags: lesson.tags,
-    visibility: lesson.visibility,
-    summary: lesson.summary,
-    blockCount: lesson.blocks.length,
-    sectionCount: lesson.sections.length,
-    stage: lesson.stage,
-    createdAt: lesson.createdAt,
-    updatedAt: lesson.updatedAt,
-  };
 }
 
 function canRead(lesson: Lesson, userId: string | null): boolean {
@@ -496,9 +480,9 @@ export async function updateProfile(
     if (!existing) return null;
     const next = apply(cleanAccount(existing));
     await users.replaceOne({ id }, next);
-    await mongoDb().then((database) =>
-      database.collection<Lesson>("lessons").updateMany({ ownerId: id }, { $set: { institution: patch.institution, ownerName: patch.name } }),
-    );
+    const database = await mongoDb();
+    await database.collection<Lesson>("lessons").updateMany({ ownerId: id }, { $set: { institution: patch.institution, ownerName: patch.name } });
+    await database.collection<Course>("courses").updateMany({ ownerId: id }, { $set: { institution: patch.institution, ownerName: patch.name, joinable: patch.role === "instructor" } });
     return next;
   }
   return withFile((db) => {
@@ -511,8 +495,217 @@ export async function updateProfile(
         lesson.institution = patch.institution;
       }
     }
+    for (const course of db.courses) {
+      if (course.ownerId === id) {
+        course.ownerName = patch.name;
+        course.institution = patch.institution;
+        course.joinable = patch.role === "instructor";
+      }
+    }
     return structuredClone(account);
   });
+}
+
+function cleanCourse(course: Course): Course {
+  const copy = { ...course } as Course & { _id?: unknown };
+  delete copy._id;
+  return {
+    ...copy,
+    topics: Array.isArray(copy.topics) ? copy.topics : [],
+    lessonIds: Array.isArray(copy.lessonIds) ? copy.lessonIds : [],
+    joinable: copy.joinable === true,
+    visibility: copy.visibility === "private" ? "private" : "public",
+  };
+}
+
+export async function createCourse(input: {
+  ownerId: string;
+  ownerName: string;
+  institution: string;
+  joinable: boolean;
+  title: string;
+  summary: string;
+  topics: string[];
+}): Promise<Course> {
+  const timestamp = new Date().toISOString();
+  const course: Course = {
+    id: crypto.randomUUID(),
+    ownerId: input.ownerId,
+    ownerName: input.ownerName,
+    institution: input.institution,
+    title: input.title,
+    summary: input.summary,
+    topics: input.topics,
+    visibility: "public",
+    joinable: input.joinable,
+    lessonIds: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  if ((await activeStorage()) === "mongo") {
+    await (await mongoDb()).collection<Course>("courses").insertOne({ ...course });
+    return course;
+  }
+  return withFile((db) => {
+    db.courses.push(course);
+    return course;
+  });
+}
+
+export async function listOwnerCourses(ownerId: string): Promise<Course[]> {
+  if ((await activeStorage()) === "mongo") {
+    const courses = await (await mongoDb()).collection<Course>("courses").find({ ownerId }).sort({ updatedAt: -1 }).toArray();
+    return courses.map(cleanCourse);
+  }
+  return withFile((db) => db.courses.filter((course) => course.ownerId === ownerId).map(cleanCourse));
+}
+
+export async function searchCourses(query: string, filters: { instructor?: string; institution?: string } = {}): Promise<Course[]> {
+  const needle = query.trim().toLowerCase();
+  const instructor = filters.instructor?.trim().toLowerCase() ?? "";
+  const institution = filters.institution?.trim().toLowerCase() ?? "";
+  const matches = (course: Course) => {
+    if (course.visibility !== "public") return false;
+    if (instructor && !course.ownerName.toLowerCase().includes(instructor)) return false;
+    if (institution && !course.institution.toLowerCase().includes(institution)) return false;
+    if (!needle) return true;
+    return [course.title, course.summary, course.ownerName, course.institution, ...course.topics].join(" ").toLowerCase().includes(needle);
+  };
+  if ((await activeStorage()) === "mongo") {
+    const courses = await (await mongoDb()).collection<Course>("courses").find({ visibility: "public" }).sort({ updatedAt: -1 }).limit(40).toArray();
+    return courses.filter(matches).map(cleanCourse);
+  }
+  return withFile((db) => db.courses.filter(matches).slice(0, 40).map(cleanCourse));
+}
+
+export async function getCourse(id: string): Promise<Course | null> {
+  if ((await activeStorage()) === "mongo") {
+    const course = await (await mongoDb()).collection<Course>("courses").findOne({ id });
+    return course ? cleanCourse(course) : null;
+  }
+  return withFile((db) => {
+    const course = db.courses.find((item) => item.id === id);
+    return course ? cleanCourse(course) : null;
+  });
+}
+
+export async function getLessonsByIds(ids: string[]): Promise<Lesson[]> {
+  if (ids.length === 0) return [];
+  if ((await activeStorage()) === "mongo") {
+    const lessons = await (await mongoDb()).collection<Lesson>("lessons").find({ id: { $in: ids } }).toArray();
+    const byId = new Map(lessons.map((lesson) => [lesson.id, cleanLesson(lesson)]));
+    return ids.flatMap((id) => {
+      const lesson = byId.get(id);
+      return lesson ? [lesson] : [];
+    });
+  }
+  return withFile((db) => ids.flatMap((id) => {
+    const lesson = db.lessons.find((item) => item.id === id);
+    return lesson ? [cleanLesson(lesson)] : [];
+  }));
+}
+
+export async function updateCourse(
+  id: string,
+  ownerId: string,
+  patch: { title?: string; summary?: string; topics?: string[]; addLessonId?: string; removeLessonId?: string },
+): Promise<Course | null> {
+  const apply = (course: Course) => {
+    if (course.ownerId !== ownerId) return null;
+    if (patch.title) course.title = patch.title;
+    if (typeof patch.summary === "string") course.summary = patch.summary;
+    if (patch.topics) course.topics = patch.topics;
+    if (patch.addLessonId && !course.lessonIds.includes(patch.addLessonId)) course.lessonIds.push(patch.addLessonId);
+    if (patch.removeLessonId) course.lessonIds = course.lessonIds.filter((lessonId) => lessonId !== patch.removeLessonId);
+    course.updatedAt = new Date().toISOString();
+    return course;
+  };
+  if ((await activeStorage()) === "mongo") {
+    const courses = (await mongoDb()).collection<Course>("courses");
+    const existing = await courses.findOne({ id });
+    if (!existing) return null;
+    const next = apply(cleanCourse(existing));
+    if (!next) return null;
+    await courses.replaceOne({ id }, next);
+    return next;
+  }
+  return withFile((db) => {
+    const course = db.courses.find((item) => item.id === id);
+    if (!course) return null;
+    return apply(course) ? cleanCourse(course) : null;
+  });
+}
+
+export async function enrollmentFor(courseId: string, userId: string): Promise<Enrollment | null> {
+  if ((await activeStorage()) === "mongo") {
+    const row = await (await mongoDb()).collection<Enrollment>("enrollments").findOne({ courseId, userId });
+    if (!row) return null;
+    const copy = { ...row } as Enrollment & { _id?: unknown };
+    delete copy._id;
+    return copy;
+  }
+  return withFile((db) => db.enrollments.find((row) => row.courseId === courseId && row.userId === userId) ?? null);
+}
+
+export async function requestJoin(course: Course, user: { id: string; name: string }): Promise<Enrollment | null> {
+  if (!course.joinable || course.ownerId === user.id) return null;
+  const existing = await enrollmentFor(course.id, user.id);
+  if (existing) return existing;
+  const row: Enrollment = { courseId: course.id, userId: user.id, userName: user.name, status: "requested", createdAt: new Date().toISOString() };
+  if ((await activeStorage()) === "mongo") {
+    await (await mongoDb()).collection<Enrollment>("enrollments").insertOne({ ...row });
+    return row;
+  }
+  return withFile((db) => {
+    db.enrollments.push(row);
+    return row;
+  });
+}
+
+export async function listEnrollments(courseId: string): Promise<Enrollment[]> {
+  if ((await activeStorage()) === "mongo") {
+    const rows = await (await mongoDb()).collection<Enrollment>("enrollments").find({ courseId }).toArray();
+    return rows.map((row) => {
+      const copy = { ...row } as Enrollment & { _id?: unknown };
+      delete copy._id;
+      return copy;
+    });
+  }
+  return withFile((db) => db.enrollments.filter((row) => row.courseId === courseId));
+}
+
+export async function setEnrollment(courseId: string, ownerId: string, userId: string, action: "member" | "remove"): Promise<boolean> {
+  const course = await getCourse(courseId);
+  if (!course || course.ownerId !== ownerId) return false;
+  if ((await activeStorage()) === "mongo") {
+    const rows = (await mongoDb()).collection<Enrollment>("enrollments");
+    if (action === "remove") {
+      await rows.deleteOne({ courseId, userId });
+      return true;
+    }
+    await rows.updateOne({ courseId, userId }, { $set: { status: "member" } });
+    return true;
+  }
+  return withFile((db) => {
+    if (action === "remove") {
+      db.enrollments = db.enrollments.filter((row) => !(row.courseId === courseId && row.userId === userId));
+      return true;
+    }
+    const row = db.enrollments.find((item) => item.courseId === courseId && item.userId === userId);
+    if (row) row.status = "member";
+    return true;
+  });
+}
+
+export async function lessonSharedThroughCourse(lessonId: string, userId: string | null): Promise<boolean> {
+  const courses = (await activeStorage()) === "mongo"
+    ? (await (await mongoDb()).collection<Course>("courses").find({ lessonIds: lessonId }).toArray()).map(cleanCourse)
+    : await withFile((db) => db.courses.filter((course) => course.lessonIds.includes(lessonId)).map(cleanCourse));
+  for (const course of courses) {
+    if (course.visibility === "public") return true;
+    if (userId && (await enrollmentFor(course.id, userId))?.status === "member") return true;
+  }
+  return false;
 }
 
 export async function attachGoogleSub(id: string, googleSub: string): Promise<void> {

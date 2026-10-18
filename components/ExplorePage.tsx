@@ -1,14 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { LessonCard } from "./LessonCard";
-import type { LessonSummary } from "@/lib/types";
+import type { Course, LessonSummary } from "@/lib/types";
 
 export function ExplorePage() {
   const [query, setQuery] = useState("");
   const [instructor, setInstructor] = useState("");
   const [institution, setInstitution] = useState("");
   const [lessons, setLessons] = useState<LessonSummary[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -20,8 +22,9 @@ export function ExplorePage() {
       const search = params.toString();
       void fetch(search ? `/api/explore?${search}` : "/api/explore")
         .then((response) => response.json())
-        .then((body: { lessons: LessonSummary[] }) => {
+        .then((body: { lessons: LessonSummary[]; courses?: Course[] }) => {
           setLessons(body.lessons ?? []);
+          setCourses(body.courses ?? []);
           setLoaded(true);
         });
     }, 200);
@@ -52,7 +55,23 @@ export function ExplorePage() {
           className="rounded-full border border-line bg-paper px-5 py-2 outline-none focus:border-accent"
         />
       </div>
-      <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {courses.length > 0 ? (
+        <section className="mt-8">
+          <h2 className="font-display text-3xl">Courses</h2>
+          <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {courses.map((course) => (
+              <Link key={course.id} href={`/courses/${course.id}`} className="rounded-3xl border border-line bg-paper p-5 shadow-sm">
+                <p className="text-sm text-accent">{course.joinable ? "Instructor course" : "Course"}</p>
+                <h3 className="mt-2 font-display text-2xl">{course.title}</h3>
+                <p className="mt-2 text-sm text-muted">{course.ownerName}</p>
+                <p className="text-sm text-muted">{course.topics.join(" · ") || course.institution}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      <h2 className="mt-10 font-display text-3xl">Lessons</h2>
+      <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {lessons.map((lesson) => (
           <LessonCard key={lesson.id} lesson={lesson} />
         ))}

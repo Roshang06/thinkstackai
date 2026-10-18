@@ -1,10 +1,12 @@
-import { searchPublic } from "@/lib/store";
+import { searchCourses, searchPublic } from "@/lib/store";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const lessons = await searchPublic(url.searchParams.get("q") ?? "", {
+  const filters = {
     instructor: url.searchParams.get("instructor") ?? "",
     institution: url.searchParams.get("institution") ?? "",
-  });
-  return Response.json({ lessons });
+  };
+  const query = url.searchParams.get("q") ?? "";
+  const [lessons, courses] = await Promise.all([searchPublic(query, filters), searchCourses(query, filters)]);
+  return Response.json({ lessons, courses });
 }

@@ -135,6 +135,31 @@ export type LessonSummary = {
   updatedAt: string;
 };
 
+export type Course = {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  institution: string;
+  title: string;
+  summary: string;
+  topics: string[];
+  visibility: "public" | "private";
+  joinable: boolean;
+  lessonIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EnrollmentStatus = "requested" | "member";
+
+export type Enrollment = {
+  courseId: string;
+  userId: string;
+  userName: string;
+  status: EnrollmentStatus;
+  createdAt: string;
+};
+
 export type Progress = {
   userId: string;
   lessonId: string;
