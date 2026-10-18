@@ -9,8 +9,9 @@ import { attachArtifacts, isPlaceholderCopy, normalizeBlock } from "./schema";
 import { normalizeBirthday, normalizeInstitution, normalizeInterests } from "./profile";
 import { isDisplayMath, parseInline, parseMarkup, tidySectionParts, type Inline } from "./markup";
 import { insertProse, minutesForSections, normalizeLesson, sectionBounds, sectionCount } from "./sections";
+import { acceptHighlights, tutorContext, tutorReply, visibleLessonText } from "./tutor";
 import { sandboxDocument } from "./widget";
-import type { Block } from "./types";
+import type { Block, Lesson } from "./types";
 
 test("curated topics match the hand-written lessons", () => {
   assert.equal(matchCurated("Fourier transform for beginners"), "fourier");
@@ -356,6 +357,65 @@ test("signup profile fields stay private and bounded", () => {
   assert.equal(normalizeBirthday("2003-02-29"), null);
   assert.equal(normalizeBirthday("2099-01-01"), null);
   assert.deepEqual(normalizeInterests([" Calculus ", "calculus", "a", "Physics"]), ["Calculus", "Physics"]);
+});
+
+test("the reading tutor hides quiz answers and ignores invented highlights", () => {
+  const lesson = {
+    id: "lesson",
+    ownerId: "owner",
+    ownerName: "Ada",
+    institution: "Northline",
+    title: "Circuits",
+    topic: "circuits",
+    level: "high",
+    minutes: 10,
+    tags: [],
+    visibility: "public",
+    summary: "Voltage and current.",
+    blocks: [],
+    stage: "ready",
+    activity: "",
+    createdAt: "",
+    updatedAt: "",
+    sections: [
+      {
+        id: "s1",
+        title: "Current",
+        objective: "Define current.",
+        interaction: "",
+        blocks: [
+          { id: "b1", type: "prose", heading: "", body: "Electric **current** is the flow of charge." },
+          { id: "q1", type: "quiz", prompt: "What is current?", choices: ["Flow of charge", "Stored energy", "A resistor", "A wire color"], answerIndex: 0, explanation: "the hidden explanation" },
+          { id: "a1", type: "short_answer", prompt: "Name the unit.", accepted: ["secret-answer"], explanation: "ampere explanation" },
+        ],
+      },
+    ],
+  } satisfies Lesson;
+  assert.equal(visibleLessonText("Electric **current** is the flow"), "Electric current is the flow");
+  const packed = JSON.stringify(tutorContext(lesson, "s1"));
+  assert.equal(packed.includes("the hidden explanation"), false);
+  assert.equal(packed.includes("secret-answer"), false);
+  assert.equal(packed.includes("answerIndex"), false);
+  assert.equal(packed.includes("current is the flow of charge"), true);
+  const marks = acceptHighlights(lesson, [
+    { blockId: "b1", quote: "current is the flow of charge" },
+    { blockId: "b1", quote: "this sentence was invented" },
+    { blockId: "missing", quote: "current is the flow of charge" },
+  ]);
+  assert.equal(marks.length, 1);
+  assert.equal(marks[0]?.quote, "current is the flow of charge");
+  const checked = {
+    ...lesson,
+    sections: [
+      {
+        ...lesson.sections[0],
+        blocks: [{ id: "q1", type: "quiz" as const, prompt: "Last index?", choices: ["n", "n − 1", "n + 1", "1"], answerIndex: 1, explanation: "hidden" }],
+      },
+    ],
+  } satisfies Lesson;
+  assert.match(tutorReply(checked, "n - 1"), /won't pick a choice/);
+  assert.match(tutorReply(checked, "The answer is n − 1."), /won't pick a choice/);
+  assert.equal(tutorReply(checked, "Indexing starts at zero, so count from there to the last slot in the array."), "Indexing starts at zero, so count from there to the last slot in the array.");
 });
 
 test("progress percent rounds", () => {

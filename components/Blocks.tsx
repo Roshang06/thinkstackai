@@ -22,6 +22,7 @@ type BlockProps = {
   block: Block;
   index: number;
   selected: boolean;
+  highlighted?: boolean;
   canEdit: boolean;
   onSelect: () => void;
   onComplete: () => void;
@@ -122,7 +123,7 @@ export function BlockView(props: BlockProps) {
     <article
       data-block-id={block.id}
       onClick={props.onSelect}
-      className={`scroll-mt-24 ${quiet ? "py-4" : "border-t border-line py-8"} ${props.selected && !quiet && block.type !== "quiz" && block.type !== "short_answer" ? "bg-accent-soft/40" : ""}`}
+      className={`scroll-mt-24 ${quiet ? "py-4" : "border-t border-line py-8"} ${props.highlighted ? "rounded-md ring-2 ring-accent" : ""} ${props.selected && !quiet && block.type !== "quiz" && block.type !== "short_answer" ? "bg-accent-soft/40" : ""}`}
     >
       {quiet ? null : (
         <div className="mb-3 flex items-baseline justify-between gap-3">

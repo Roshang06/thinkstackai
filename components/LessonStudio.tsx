@@ -4,9 +4,11 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { displayProse } from "@/lib/markup";
 import { BlockView, FormattedLine } from "./Blocks";
+import { applyTutorHighlights, clearTutorHighlights } from "./highlight-quote";
 import { readSse } from "./read-sse";
 import { ProgressBar } from "./ProgressBar";
 import { jsonHeaders, useUser } from "./user";
+import type { TutorHighlight } from "@/lib/tutor";
 import type { Block, ChatMessage, Lesson, LessonStage } from "@/lib/types";
 
 export function LessonStudio() {
@@ -24,6 +26,9 @@ export function LessonStudio() {
   const [error, setError] = useState("");
   const [sectionIndex, setSectionIndex] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [tutorOpen, setTutorOpen] = useState(false);
+  const [tutorMessages, setTutorMessages] = useState<ChatMessage[]>([]);
+  const [highlights, setHighlights] = useState<TutorHighlight[]>([]);
   const [activity, setActivity] = useState("");
   const [retrying, setRetrying] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -33,6 +38,7 @@ export function LessonStudio() {
   const abortRef = useRef<AbortController | null>(null);
   const lastSelection = useRef<{ text: string; blockId: string } | null>(null);
   const skipScroll = useRef(true);
+  const highlightNav = useRef(false);
 
   const load = useCallback(async () => {
     if (!params.id) return;
@@ -176,8 +182,21 @@ export function LessonStudio() {
   }, []);
 
   useEffect(() => {
-    if (skipScroll.current) {
+    if (highlights.length === 0) {
+      clearTutorHighlights();
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => applyTutorHighlights(highlights));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      clearTutorHighlights();
+    };
+  }, [highlights, sectionIndex, lesson]);
+
+  useEffect(() => {
+    if (skipScroll.current || highlightNav.current) {
       skipScroll.current = false;
+      highlightNav.current = false;
       return;
     }
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -247,6 +266,41 @@ export function LessonStudio() {
       ...current,
       { id: crypto.randomUUID(), lessonId: lesson.id, role: "user", text: instruction, createdAt: new Date().toISOString() },
       message,
+    ]);
+    setInstruction("");
+    setSelection("");
+  }
+
+  async function askTutorQuestion() {
+    if (!lesson || instruction.trim().length < 2 || lesson.stage === "drafting") return;
+    const question = instruction.trim();
+    setBusy(true);
+    setError("");
+    const response = await fetch(`/api/lessons/${lesson.id}/ask`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        question,
+        sectionId: lesson.sections[sectionIndex]?.id,
+        selection,
+        history: tutorMessages.slice(-6).map((message) => ({ role: message.role, text: message.text })),
+      }),
+    });
+    const body = (await response.json().catch(() => ({}))) as { error?: string; reply?: string; highlights?: TutorHighlight[] };
+    setBusy(false);
+    if (!response.ok || !body.reply) {
+      setError(body.error ?? "The tutor could not answer.");
+      return;
+    }
+    const marks = Array.isArray(body.highlights) ? body.highlights : [];
+    const host = lesson.sections.findIndex((item) => item.blocks.some((block) => marks.some((mark) => mark.blockId === block.id)));
+    if (host >= 0 && host !== sectionIndex) highlightNav.current = true;
+    if (host >= 0) setSectionIndex(host);
+    setHighlights(marks);
+    setTutorMessages((current) => [
+      ...current,
+      { id: crypto.randomUUID(), lessonId: lesson.id, role: "user", text: question, createdAt: new Date().toISOString() },
+      { id: crypto.randomUUID(), lessonId: lesson.id, role: "model", text: body.reply ?? "", createdAt: new Date().toISOString() },
     ]);
     setInstruction("");
     setSelection("");
@@ -323,7 +377,18 @@ export function LessonStudio() {
             <button type="button" onClick={() => setEditorOpen((open) => !open)} className="shrink-0 rounded-full border border-line px-3 py-1 text-sm">
               {editorOpen ? "Close editor" : "Edit with AI"}
             </button>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setTutorOpen((open) => !open);
+                if (tutorOpen) setHighlights([]);
+              }}
+              className="shrink-0 rounded-full border border-line px-3 py-1 text-sm"
+            >
+              {tutorOpen ? "Close tutor" : "Ask the tutor"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -395,6 +460,7 @@ export function LessonStudio() {
                   block={shown}
                   index={index}
                   selected={target === block.id}
+                  highlighted={highlights.some((mark) => mark.blockId === block.id)}
                   canEdit={canEdit && !drafting}
                   onSelect={() => setTarget(block.id)}
                   onComplete={() => {
@@ -524,6 +590,73 @@ export function LessonStudio() {
               </div>
             </form>
           )}
+        </aside>
+      ) : null}
+
+      {tutorOpen && !canEdit ? (
+        <aside className="fixed inset-y-0 right-0 z-20 flex w-full max-w-md flex-col border-l border-line bg-paper shadow-xl">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <div>
+              <h2 className="font-display text-2xl">Tutor</h2>
+              <p className="text-sm text-muted">Ask about {section?.title ?? "this lesson"}. Nothing here edits the page.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setTutorOpen(false);
+                setHighlights([]);
+              }}
+              className="text-sm text-muted"
+            >
+              Close
+            </button>
+          </div>
+          <ol className="min-h-0 flex-1 space-y-3 overflow-auto px-4 py-4">
+            {tutorMessages.length === 0 ? <li className="text-sm text-muted">Ask why a step works, or what a word means. The tutor can mark the passage on the page.</li> : null}
+            {tutorMessages.map((message) => (
+              <li key={message.id} className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm leading-6 ${message.role === "user" ? "ml-auto bg-accent text-paper" : "bg-background"}`}>
+                <FormattedLine text={message.text} />
+              </li>
+            ))}
+          </ol>
+          <form
+            className="grid gap-2 border-t border-line px-4 py-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void askTutorQuestion();
+            }}
+          >
+            {selection ? (
+              <p className="flex items-start justify-between gap-2 border border-line px-2 py-1 text-xs text-muted">
+                <span className="line-clamp-3">{selection}</span>
+                <button type="button" onClick={() => setSelection("")} className="shrink-0">
+                  Clear
+                </button>
+              </p>
+            ) : null}
+            <textarea
+              value={instruction}
+              onChange={(event) => setInstruction(event.target.value)}
+              placeholder="Why does this step work?"
+              rows={4}
+              className="w-full resize-none border border-line bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  attachSelection();
+                }}
+                className="rounded-full border border-line px-3 py-2 text-sm"
+              >
+                Use selection
+              </button>
+              <button type="submit" disabled={busy || drafting} className="rounded-full bg-accent px-3 py-2 text-sm text-paper disabled:opacity-60">
+                {busy ? "Thinking…" : "Ask"}
+              </button>
+            </div>
+          </form>
         </aside>
       ) : null}
     </div>
