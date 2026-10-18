@@ -105,7 +105,7 @@ export function HomePage() {
     if (loading) return;
     if (!user) {
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-      router.push("/login?next=/");
+      router.push("/login?next=/create");
       return;
     }
     void createLesson(draft);

@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useUser } from "./user";
 
 export function AppHeader() {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, loading, refresh } = useUser();
 
   async function logout() {
@@ -21,10 +22,10 @@ export function AppHeader() {
           Thinkstack
         </Link>
         <nav className="flex gap-4 text-sm text-muted">
-          <Link href="/" className="hover:text-foreground">
-            Lessons
+          <Link href="/create" className={pathname === "/create" ? "text-foreground" : "hover:text-foreground"}>
+            Create lesson
           </Link>
-          <Link href="/explore" className="hover:text-foreground">
+          <Link href="/explore" className={pathname === "/explore" ? "text-foreground" : "hover:text-foreground"}>
             Explore
           </Link>
         </nav>
