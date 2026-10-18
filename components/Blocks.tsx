@@ -8,6 +8,7 @@ import type {
   Block,
   CodeBlock,
   EquationBlock,
+  WidgetBlock,
   FlashcardsBlock,
   GraphBlock,
   ProseBlock,
@@ -36,6 +37,7 @@ const LABELS: Record<Block["type"], string> = {
   flashcards: "Cards",
   code: "Code",
   simulation: "Simulation",
+  widget: "Interaction",
 };
 
 export function BlockView(props: BlockProps) {
@@ -64,6 +66,7 @@ export function BlockView(props: BlockProps) {
       {block.type === "flashcards" ? <FlashcardsView {...props} block={block} /> : null}
       {block.type === "code" ? <CodeView {...props} block={block} /> : null}
       {block.type === "simulation" ? <SimulationView {...props} block={block} /> : null}
+      {block.type === "widget" ? <WidgetView {...props} block={block} /> : null}
     </article>
   );
 }
@@ -319,6 +322,29 @@ function CodeView({ block, canEdit, onChange, onComplete }: BlockProps & { block
       </button>
       <iframe title="Code runner" sandbox="allow-scripts" srcDoc={CODE_FRAME} ref={frame} onLoad={() => setReady(true)} className="absolute h-0 w-0 border-0" />
       <pre aria-live="polite" className="mt-3 min-h-16 whitespace-pre-wrap rounded-md border border-line bg-paper p-3 font-mono text-sm">{output}</pre>
+    </div>
+  );
+}
+
+function WidgetView({ block, onComplete }: BlockProps & { block: WidgetBlock }) {
+  const ref = useMarkVisible(onComplete, block.html.trim().length > 0);
+  if (!block.html.trim()) {
+    return (
+      <div ref={ref} className="grid h-72 place-items-center border border-line bg-paper text-sm text-muted">
+        Building this interaction…
+      </div>
+    );
+  }
+  return (
+    <div ref={ref}>
+      <h2 className="mb-3 font-display text-3xl">{block.title}</h2>
+      <iframe
+        title={block.title}
+        sandbox="allow-scripts"
+        referrerPolicy="no-referrer"
+        srcDoc={block.html}
+        className="h-[28rem] w-full border border-line bg-white"
+      />
     </div>
   );
 }

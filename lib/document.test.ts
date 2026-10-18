@@ -6,6 +6,8 @@ import { buildLesson, matchCurated, seedLessons } from "./offline";
 import { generationErrorMessage } from "./gemini";
 import { backboardModels, geminiModelNames, providerLabels, specialistModel } from "./providers";
 import { attachArtifacts, isPlaceholderCopy, normalizeBlock } from "./schema";
+import { minutesForSections, normalizeLesson, sectionBounds, sectionCount } from "./sections";
+import { sandboxDocument } from "./widget";
 import type { Block } from "./types";
 
 test("curated topics match the hand-written lessons", () => {
@@ -190,6 +192,44 @@ test("an overloaded Gemini model is followed by other flash models", () => {
 
 test("quota failures become a short error", () => {
   assert.match(generationErrorMessage(new Error("You exceeded your current quota"), "fallback"), /free requests/);
+});
+
+test("longer lessons plan more sections", () => {
+  assert.equal(sectionCount(5), 2);
+  assert.equal(sectionCount(10), 4);
+  assert.equal(sectionCount(20), 6);
+  assert.deepEqual(sectionBounds(10), { min: 2, max: 6 });
+  assert.equal(minutesForSections(2), 8);
+  assert.equal(minutesForSections(6), 24);
+});
+
+test("an older lesson without sections still opens as one section", () => {
+  const lesson = normalizeLesson({
+    id: "old",
+    ownerId: "user",
+    ownerName: "Student",
+    title: "Limits",
+    topic: "Limits",
+    level: "high",
+    minutes: 10,
+    tags: [],
+    visibility: "private",
+    summary: "An introduction.",
+    blocks: [prose("Start", "A limit describes the value being approached.")],
+    createdAt: "2026-10-17T00:00:00.000Z",
+    updatedAt: "2026-10-17T00:00:00.000Z",
+  });
+  assert.equal(lesson.sections.length, 1);
+  assert.equal(lesson.sections[0]?.blocks.length, 1);
+  assert.equal(lesson.stage, "ready");
+});
+
+test("a widget document cannot load an outside script", () => {
+  const html = sandboxDocument(`<html><head><script src="https://evil.example/app.js"></script></head><body><p>Try it</p><script>document.body.dataset.ready = "yes";</script></body></html>`);
+  assert.ok(html);
+  assert.equal(html?.includes("evil.example"), false);
+  assert.match(html ?? "", /script-src 'unsafe-inline'/);
+  assert.match(html ?? "", /dataset\.ready/);
 });
 
 test("progress percent rounds", () => {

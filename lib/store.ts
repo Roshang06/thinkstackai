@@ -1,7 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { MongoClient, type Db } from "mongodb";
-import { reassignIds } from "./blocks";
+import { newId, reassignIds } from "./blocks";
+import { flattenSections, normalizeLesson } from "./sections";
 import { isBlock } from "./document";
 import { seedLessons } from "./offline";
 import type { Account, Block, ChatMessage, Lesson, LessonSummary, Progress } from "./types";
@@ -115,7 +116,7 @@ async function mongoDb(): Promise<Db> {
 function cleanLesson(lesson: Lesson): Lesson {
   const copy = { ...lesson } as Lesson & { _id?: unknown };
   delete copy._id;
-  return copy;
+  return normalizeLesson(copy);
 }
 
 function cleanMessage(message: ChatMessage): ChatMessage {
@@ -137,6 +138,8 @@ function toSummary(lesson: Lesson): LessonSummary {
     visibility: lesson.visibility,
     summary: lesson.summary,
     blockCount: lesson.blocks.length,
+    sectionCount: lesson.sections.length,
+    stage: lesson.stage,
     createdAt: lesson.createdAt,
     updatedAt: lesson.updatedAt,
   };
@@ -227,7 +230,9 @@ export async function addMessage(lessonId: string, role: "user" | "model", text:
 }
 
 export async function createLesson(lesson: Lesson): Promise<Lesson> {
-  if (!lesson.blocks.every(isBlock)) throw new Error("Invalid lesson blocks");
+  const normalized = normalizeLesson(lesson);
+  if (!normalized.blocks.every(isBlock)) throw new Error("Invalid lesson blocks");
+  lesson = normalized;
   if ((await activeStorage()) === "mongo") {
     const database = await mongoDb();
     await database.collection<Lesson>("lessons").insertOne({ ...lesson });
@@ -242,14 +247,47 @@ export async function createLesson(lesson: Lesson): Promise<Lesson> {
 export async function saveLesson(
   id: string,
   userId: string,
-  patch: { blocks?: Block[]; title?: string; summary?: string; tags?: string[]; visibility?: "private" | "public" },
+  patch: {
+    blocks?: Block[];
+    sectionId?: string;
+    sections?: Lesson["sections"];
+    stage?: Lesson["stage"];
+    activity?: string;
+    minutes?: number;
+    title?: string;
+    summary?: string;
+    tags?: string[];
+    visibility?: "private" | "public";
+  },
 ): Promise<Lesson | null> {
   const apply = (lesson: Lesson): Lesson | null => {
     if (lesson.ownerId !== userId) return null;
-    if (patch.blocks) {
+    const normalized = normalizeLesson(lesson);
+    lesson.sections = normalized.sections;
+    lesson.blocks = normalized.blocks;
+    lesson.stage = normalized.stage;
+    lesson.activity = normalized.activity;
+    if (patch.sections) {
+      if (!patch.sections.every((section) => section.blocks.every(isBlock))) throw new Error("Invalid blocks");
+      lesson.sections = patch.sections;
+      lesson.blocks = flattenSections(patch.sections);
+    } else if (patch.blocks) {
       if (!patch.blocks.every(isBlock)) throw new Error("Invalid blocks");
-      lesson.blocks = patch.blocks;
+      const sectionId = patch.sectionId;
+      if (sectionId) {
+        const index = lesson.sections.findIndex((section) => section.id === sectionId);
+        if (index < 0) return null;
+        lesson.sections[index] = { ...lesson.sections[index], blocks: patch.blocks };
+      } else if (lesson.sections.length === 1) {
+        lesson.sections[0] = { ...lesson.sections[0], blocks: patch.blocks };
+      }
+      lesson.blocks = flattenSections(lesson.sections);
     }
+    if (patch.minutes === 5 || patch.minutes === 10 || patch.minutes === 20 || (typeof patch.minutes === "number" && patch.minutes >= 5 && patch.minutes <= 30)) {
+      lesson.minutes = Math.round(patch.minutes);
+    }
+    if (patch.stage === "drafting" || patch.stage === "ready") lesson.stage = patch.stage;
+    if (typeof patch.activity === "string") lesson.activity = patch.activity.slice(0, 180);
     if (typeof patch.title === "string" && patch.title.trim()) lesson.title = patch.title.trim().slice(0, 140);
     if (typeof patch.summary === "string" && patch.summary.trim()) lesson.summary = patch.summary.trim().slice(0, 280);
     if (Array.isArray(patch.tags)) {
@@ -305,7 +343,10 @@ export async function remixLesson(id: string, userId: string, userName: string):
     ownerName: userName,
     title: `${source.title} remix`,
     visibility: "private",
-    blocks: reassignIds(source.blocks),
+    blocks: [],
+    sections: source.sections.map((section) => ({ ...section, id: newId(), blocks: reassignIds(section.blocks) })),
+    stage: "ready",
+    activity: "",
     createdAt: timestamp,
     updatedAt: timestamp,
   };

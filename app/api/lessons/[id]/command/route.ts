@@ -1,4 +1,5 @@
-import { editLesson, generationErrorMessage } from "@/lib/gemini";
+import { editCourse } from "@/lib/course";
+import { generationErrorMessage } from "@/lib/gemini";
 import { jsonError, readUser } from "@/lib/http";
 import { addMessage, getLesson, saveLesson } from "@/lib/store";
 
@@ -13,18 +14,21 @@ export async function POST(request: Request, context: Context) {
   const lesson = await getLesson(id);
   if (!lesson || lesson.ownerId !== user.id) return jsonError("Lesson not found", 404);
 
-  const body = (await request.json()) as { instruction?: string; blockId?: string; selection?: string };
+  const body = (await request.json()) as { instruction?: string; blockId?: string; sectionId?: string; selection?: string };
   const instruction = body.instruction?.trim() ?? "";
   if (instruction.length < 2 || instruction.length > 500) return jsonError("Write a short instruction", 400);
 
+  if (lesson.stage === "drafting") return jsonError("Wait until the lesson finishes.", 409);
+
   try {
-    const edited = await editLesson(lesson, {
+    const edited = await editCourse(lesson, {
       instruction,
-      blockId: body.blockId,
       selection: body.selection?.slice(0, 500),
+      visibleSectionId: body.sectionId,
     });
     const saved = await saveLesson(id, user.id, {
-      blocks: edited.blocks,
+      sections: edited.sections,
+      minutes: edited.minutes,
       title: edited.title,
       summary: edited.summary,
       tags: edited.tags,

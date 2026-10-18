@@ -149,7 +149,7 @@ export function HomePage() {
           ))}
         </fieldset>
         <fieldset className="flex flex-wrap gap-2">
-          <legend className="mb-2 text-sm text-muted">Length</legend>
+          <legend className="mb-2 text-sm text-muted">Suggested length</legend>
           {([5, 10, 20] as const).map((option) => (
             <button
               key={option}
@@ -161,8 +161,9 @@ export function HomePage() {
             </button>
           ))}
         </fieldset>
+        <p className="text-sm text-muted">The planner chooses the real length from your prompt.</p>
         <button type="submit" disabled={busy || loading} className="mt-2 w-fit rounded-full bg-accent px-5 py-2 text-paper disabled:opacity-60">
-          {busy ? "Writing lesson…" : "Create lesson"}
+          {busy ? "Planning the sections…" : "Create lesson"}
         </button>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         {!loading && !user ? <p className="text-sm text-muted">You'll sign in before the lesson is created. Public lessons are in Explore.</p> : null}
@@ -178,7 +179,7 @@ export function HomePage() {
                   <span>
                     <span className="block text-lg">{lesson.title}</span>
                     <span className="text-sm text-muted">
-                      {lesson.visibility === "public" ? "Public" : "Private"} · {lesson.blockCount} parts
+                      {lesson.stage === "drafting" ? "Writing sections" : lesson.visibility === "public" ? "Public" : "Private"} · {lesson.sectionCount} sections
                     </span>
                   </span>
                   <ProgressBar completed={progress[lesson.id]?.length ?? 0} total={lesson.blockCount} />

@@ -175,6 +175,8 @@ function blockSignature(block: Block): string {
       return `short_answer:${block.prompt}`;
     case "prose":
       return `prose:${block.heading}`;
+    case "widget":
+      return `widget:${block.brief}`;
   }
 }
 

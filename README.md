@@ -11,7 +11,7 @@ npm run dev
 
 Open http://localhost:3000.
 
-Public lessons can be read without an account. Creating a lesson asks you to sign up or log in, then writes the lesson with a model. Generation tries Backboard, then OpenRouter, then Gemini, and skips any key you have not set. If every configured model fails, the page shows an error instead of a placeholder outline. Lessons are saved in MongoDB when `MONGODB_URI` is set, and in `.data/store.json` otherwise.
+Public lessons can be read without an account. Creating a lesson asks you to sign up or log in, then a planner decides how many sections the prompt needs and writes them one at a time. A narrow question stays short. A unit can run to six sections. Each serverless call stays within a minute, and the lesson page shows which section or interaction is being built. Interactive games are self-contained HTML that run in a locked frame. Generation tries Backboard, then OpenRouter, then Gemini, and skips any key you have not set. If every configured model fails, the page shows an error instead of a placeholder outline. Lessons are saved in MongoDB when `MONGODB_URI` is set, and in `.data/store.json` otherwise.
 
 ## Keys
 

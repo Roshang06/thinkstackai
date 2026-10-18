@@ -67,6 +67,14 @@ export type SimulationBlock = {
   note: string;
 };
 
+export type WidgetBlock = {
+  id: string;
+  type: "widget";
+  title: string;
+  brief: string;
+  html: string;
+};
+
 export type Block =
   | ProseBlock
   | EquationBlock
@@ -75,7 +83,18 @@ export type Block =
   | ShortAnswerBlock
   | FlashcardsBlock
   | CodeBlock
-  | SimulationBlock;
+  | SimulationBlock
+  | WidgetBlock;
+
+export type LessonSection = {
+  id: string;
+  title: string;
+  objective: string;
+  interaction: string;
+  blocks: Block[];
+};
+
+export type LessonStage = "drafting" | "ready";
 
 export type Lesson = {
   id: string;
@@ -89,6 +108,9 @@ export type Lesson = {
   visibility: "private" | "public";
   summary: string;
   blocks: Block[];
+  sections: LessonSection[];
+  stage: LessonStage;
+  activity: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -105,6 +127,8 @@ export type LessonSummary = {
   visibility: "private" | "public";
   summary: string;
   blockCount: number;
+  sectionCount: number;
+  stage: LessonStage;
   createdAt: string;
   updatedAt: string;
 };
@@ -144,5 +168,6 @@ export type LessonDraftInput = {
 export type CommandInput = {
   instruction: string;
   blockId?: string | null;
+  sectionId?: string | null;
   selection?: string | null;
 };

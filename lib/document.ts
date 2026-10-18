@@ -10,6 +10,7 @@ const BLOCK_TYPES = new Set([
   "flashcards",
   "code",
   "simulation",
+  "widget",
 ]);
 
 export function isBlock(value: unknown): value is Block {
@@ -67,6 +68,8 @@ export function isBlock(value: unknown): value is Block {
         typeof block.title === "string" &&
         typeof block.note === "string"
       );
+    case "widget":
+      return typeof block.title === "string" && typeof block.brief === "string" && typeof block.html === "string";
     default:
       return false;
   }

@@ -24,14 +24,16 @@ export async function PATCH(request: Request, context: Context) {
   const user = await readUser(request);
   if (!user) return jsonError("Sign in required", 401);
   const { id } = await context.params;
-  const body = (await request.json()) as { blocks?: unknown; title?: string; visibility?: "private" | "public" };
+  const body = (await request.json()) as { blocks?: unknown; sectionId?: string; title?: string; visibility?: "private" | "public" };
   let blocks: Block[] | undefined;
   if (body.blocks !== undefined) {
     if (!Array.isArray(body.blocks) || !body.blocks.every(isBlock)) return jsonError("Invalid blocks", 400);
     blocks = body.blocks;
   }
+  const existing = await getLesson(id);
+  if (existing?.stage === "drafting" && blocks) return jsonError("Wait until the lesson finishes.", 409);
   try {
-    const lesson = await saveLesson(id, user.id, { blocks, title: body.title, visibility: body.visibility });
+    const lesson = await saveLesson(id, user.id, { blocks, sectionId: body.sectionId, title: body.title, visibility: body.visibility });
     if (!lesson) return jsonError("Lesson not found", 404);
     return Response.json({ lesson });
   } catch {

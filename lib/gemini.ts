@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { newId } from "./blocks";
 import { liveModelEnabled, runDocumentProviders, runSpecialist, type DocumentTool } from "./providers";
+import { buildWidget } from "./course";
 import { attachArtifacts, flatBlockSchema, lessonDraftSchema, normalizeBlock, normalizeBlocks } from "./schema";
 import type { Block, CommandInput, Lesson, LessonDraftInput, ProseBlock } from "./types";
 
@@ -221,6 +222,9 @@ export async function generateLesson(input: LessonDraftInput): Promise<{ lesson:
     visibility: "private",
     summary: draft.summary.slice(0, 280),
     blocks,
+    sections: [{ id: newId(), title: draft.title.slice(0, 140), objective: draft.summary.slice(0, 280), interaction: "", blocks }],
+    stage: "ready",
+    activity: "",
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -252,6 +256,20 @@ export async function editLesson(
   const focused = Boolean(input.blockId || input.selection?.trim());
 
   const tools: Record<string, DocumentTool> = {
+    request_widget: {
+      description: "Ask a specialist model for one self-contained interactive game or simulation, then insert it.",
+      inputSchema: z.object({ status: z.string(), afterBlockId: z.string(), brief: z.string() }),
+      execute: async (raw) => {
+        const request = raw as { status?: string; afterBlockId?: string; brief?: string };
+        if (!request.brief?.trim()) return { ok: false, error: "Describe the interaction." };
+        const created = await buildWidget({ topic: lesson.topic, level: lesson.level, title: lesson.title, brief: request.brief });
+        const index = state.blocks.findIndex((item) => item.id === request.afterBlockId);
+        state.blocks.splice(index >= 0 ? index + 1 : state.blocks.length, 0, created);
+        state.status = (request.status || "Added an interaction.").slice(0, 180);
+        state.changed = true;
+        return { ok: true, blockId: created.id };
+      },
+    },
     request_artifact: {
       description: "Ask a specialist model for one equation, graph, quiz, flashcards, code, or simulation block, then insert it.",
       inputSchema: z.object({
@@ -401,7 +419,7 @@ export async function editLesson(
       DOCUMENT_RULES,
       focused
         ? "A block is selected. Change that part with insert_block, replace_block, delete_block, or rewrite_prose."
-        : "No block is selected. For a graph, equation, runnable example, or simulation, call request_artifact once and stop. Use rewrite_prose, insert_block, replace_block, or delete_block for a local text change. Call write_lesson only when the learner asks to redo the whole lesson.",
+        : "No block is selected. For a custom game or simulation, call request_widget once. For a graph, equation, or code example, call request_artifact once. Use rewrite_prose, insert_block, replace_block, or delete_block for a local text change. Call write_lesson only when the learner asks to redo this section.",
     ].join(" "),
     prompt: JSON.stringify({
       title: lesson.title,

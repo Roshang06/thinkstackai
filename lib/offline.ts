@@ -1,4 +1,5 @@
 import { code, equation, flashcards, graph, prose, quiz, reassignIds, shortAnswer, simulation } from "./blocks";
+import { oneSection } from "./sections";
 import type { Block, Lesson, LessonDraftInput } from "./types";
 
 type CuratedId = "fourier" | "projectile" | "derivative";
@@ -219,6 +220,9 @@ export function buildLesson(input: LessonDraftInput, id: string): { lesson: Less
     visibility: "private",
     summary: curated?.summary ?? `An outline for ${input.topic.trim()}. Connect Gemini to write the explanation.`,
     blocks,
+    sections: oneSection(title, curated?.summary ?? input.topic.trim(), blocks, `${id}-section`),
+    stage: "ready",
+    activity: "",
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -249,6 +253,9 @@ export function seedLessons(): Lesson[] {
       visibility: "public" as const,
       summary: curated.summary,
       blocks: curated.blocks(),
+      sections: oneSection(curated.title, curated.summary, curated.blocks(), `seed-${curatedId}-section`),
+      stage: "ready" as const,
+      activity: "",
       createdAt: timestamp,
       updatedAt: timestamp,
     };

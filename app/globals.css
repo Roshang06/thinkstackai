@@ -31,3 +31,12 @@ body {
 .font-display {
   font-family: var(--font-fraunces), serif;
 }
+
+@keyframes thinkstack-slide {
+  0% { transform: translateX(-70%); }
+  100% { transform: translateX(240%); }
+}
+
+.animate-thinkstack {
+  animation: thinkstack-slide 1.2s ease-in-out infinite;
+}

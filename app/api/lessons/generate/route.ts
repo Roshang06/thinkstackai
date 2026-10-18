@@ -1,7 +1,8 @@
-import { generateLesson, generationErrorMessage } from "@/lib/gemini";
+import { draftSections, planLesson } from "@/lib/course";
+import { generationErrorMessage } from "@/lib/gemini";
 import { jsonError, readUser } from "@/lib/http";
 import { addMessage, createLesson } from "@/lib/store";
-import type { Level } from "@/lib/types";
+import type { Lesson, Level } from "@/lib/types";
 
 export const maxDuration = 60;
 
@@ -12,23 +13,37 @@ export async function POST(request: Request) {
   if (!user) return jsonError("Sign in to create a lesson.", 401);
   const body = (await request.json()) as { topic?: string; level?: Level; minutes?: number };
   const topic = body.topic?.trim() ?? "";
-  if (topic.length < 2 || topic.length > 160) return jsonError("Add a topic", 400);
+  if (topic.length < 2 || topic.length > 500) return jsonError("Add a topic", 400);
   if (!body.level || !LEVELS.has(body.level)) return jsonError("Choose a level", 400);
   if (body.minutes !== 5 && body.minutes !== 10 && body.minutes !== 20) return jsonError("Choose a length", 400);
 
   try {
-    const draft = await generateLesson({
-      topic,
-      level: body.level,
-      minutes: body.minutes,
+    const outline = await planLesson({ topic, level: body.level, minutes: body.minutes });
+    const sections = draftSections(outline);
+    const timestamp = new Date().toISOString();
+    const lesson: Lesson = {
+      id: crypto.randomUUID(),
       ownerId: user.id,
       ownerName: user.name,
-    });
-    const lesson = await createLesson(draft.lesson);
-    const message = await addMessage(lesson.id, "model", draft.status);
-    return Response.json({ lesson, message });
+      title: outline.title,
+      topic,
+      level: body.level,
+      minutes: outline.minutes,
+      tags: outline.tags,
+      visibility: "private",
+      summary: outline.summary,
+      blocks: [],
+      sections,
+      stage: "drafting",
+      activity: "",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const saved = await createLesson(lesson);
+    await addMessage(saved.id, "model", outline.status);
+    return Response.json({ lesson: saved });
   } catch (error) {
-    console.error("Lesson generation failed", error instanceof Error ? error.message : error);
-    return jsonError(generationErrorMessage(error, "Lesson generation failed. Try again."), 502);
+    console.error("Lesson planning failed", error instanceof Error ? error.message : error);
+    return jsonError(generationErrorMessage(error, "Lesson planning failed. Try again."), 502);
   }
 }
