@@ -34,7 +34,9 @@ export function AppHeader() {
         <div className="ml-auto flex items-center gap-4 text-sm">
           {loading ? null : user ? (
             <>
-              <span className="text-muted">{user.name}</span>
+              <Link href="/profile" className="text-muted hover:text-foreground">
+                {user.name}
+              </Link>
               <button type="button" onClick={() => void logout()} className="text-muted hover:text-foreground">
                 Log out
               </button>

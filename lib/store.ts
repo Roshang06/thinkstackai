@@ -5,7 +5,8 @@ import { newId, reassignIds } from "./blocks";
 import { flattenSections, normalizeLesson } from "./sections";
 import { isBlock } from "./document";
 import { seedLessons } from "./offline";
-import type { Account, Block, ChatMessage, Lesson, LessonSummary, Progress } from "./types";
+import { profileFromAccount } from "./profile";
+import type { Account, Block, ChatMessage, Lesson, LessonSummary, Profile, Progress, Role } from "./types";
 
 type DatabaseShape = {
   lessons: Lesson[];
@@ -395,7 +396,8 @@ export function lessonReadable(lesson: Lesson, userId: string | null): boolean {
 function cleanAccount(account: Account): Account {
   const copy = { ...account } as Account & { _id?: unknown };
   delete copy._id;
-  return copy;
+  const profile = profileFromAccount(copy);
+  return { ...copy, ...profile, passwordHash: copy.passwordHash ?? null, googleSub: copy.googleSub ?? null, createdAt: copy.createdAt };
 }
 
 let userIndexesReady = false;
@@ -416,7 +418,10 @@ export async function findAccountByEmail(email: string): Promise<Account | null>
     const account = await (await usersCollection()).findOne({ email: normalized });
     return account ? cleanAccount(account) : null;
   }
-  return withFile((db) => structuredClone(db.users.find((account) => account.email === normalized) ?? null));
+  return withFile((db) => {
+    const account = db.users.find((item) => item.email === normalized);
+    return account ? cleanAccount(account) : null;
+  });
 }
 
 export async function findAccountByGoogleSub(googleSub: string): Promise<Account | null> {
@@ -424,7 +429,21 @@ export async function findAccountByGoogleSub(googleSub: string): Promise<Account
     const account = await (await usersCollection()).findOne({ googleSub });
     return account ? cleanAccount(account) : null;
   }
-  return withFile((db) => structuredClone(db.users.find((account) => account.googleSub === googleSub) ?? null));
+  return withFile((db) => {
+    const account = db.users.find((item) => item.googleSub === googleSub);
+    return account ? cleanAccount(account) : null;
+  });
+}
+
+export async function findAccountById(id: string): Promise<Account | null> {
+  if ((await activeStorage()) === "mongo") {
+    const account = await (await usersCollection()).findOne({ id });
+    return account ? cleanAccount(account) : null;
+  }
+  return withFile((db) => {
+    const account = db.users.find((item) => item.id === id);
+    return account ? cleanAccount(account) : null;
+  });
 }
 
 export async function createAccount(input: {
@@ -432,6 +451,10 @@ export async function createAccount(input: {
   name: string;
   passwordHash: string | null;
   googleSub: string | null;
+  role: Role;
+  institution: string;
+  interests: string[];
+  birthday: string;
 }): Promise<Account> {
   const account: Account = {
     id: crypto.randomUUID(),
@@ -439,6 +462,10 @@ export async function createAccount(input: {
     name: input.name,
     passwordHash: input.passwordHash,
     googleSub: input.googleSub,
+    role: input.role,
+    institution: input.institution,
+    interests: input.interests,
+    birthday: input.birthday,
     createdAt: new Date().toISOString(),
   };
   if ((await activeStorage()) === "mongo") {
@@ -448,6 +475,43 @@ export async function createAccount(input: {
   return withFile((db) => {
     db.users.push(account);
     return account;
+  });
+}
+
+export async function updateProfile(
+  id: string,
+  patch: Pick<Profile, "name" | "role" | "institution" | "interests" | "birthday">,
+): Promise<Account | null> {
+  const apply = (account: Account) => {
+    account.name = patch.name;
+    account.role = patch.role;
+    account.institution = patch.institution;
+    account.interests = patch.interests;
+    account.birthday = patch.birthday;
+    return account;
+  };
+  if ((await activeStorage()) === "mongo") {
+    const users = await usersCollection();
+    const existing = await users.findOne({ id });
+    if (!existing) return null;
+    const next = apply(cleanAccount(existing));
+    await users.replaceOne({ id }, next);
+    await mongoDb().then((database) =>
+      database.collection<Lesson>("lessons").updateMany({ ownerId: id }, { $set: { institution: patch.institution, ownerName: patch.name } }),
+    );
+    return next;
+  }
+  return withFile((db) => {
+    const account = db.users.find((item) => item.id === id);
+    if (!account) return null;
+    apply(account);
+    for (const lesson of db.lessons) {
+      if (lesson.ownerId === id) {
+        lesson.ownerName = patch.name;
+        lesson.institution = patch.institution;
+      }
+    }
+    return structuredClone(account);
   });
 }
 

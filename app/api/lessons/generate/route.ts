@@ -1,7 +1,7 @@
 import { draftSections, planLesson } from "@/lib/course";
 import { generationErrorMessage } from "@/lib/gemini";
 import { jsonError, readUser } from "@/lib/http";
-import { addMessage, createLesson } from "@/lib/store";
+import { addMessage, createLesson, findAccountById } from "@/lib/store";
 import type { Lesson, Level } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       id: crypto.randomUUID(),
       ownerId: user.id,
       ownerName: user.name,
-      institution: "",
+      institution: (await findAccountById(user.id))?.institution ?? "",
       title: outline.title,
       topic,
       level: body.level,

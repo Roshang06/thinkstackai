@@ -6,6 +6,7 @@ import { buildLesson, matchCurated, seedLessons } from "./offline";
 import { generationErrorMessage } from "./gemini";
 import { backboardModels, geminiModelNames, providerLabels, specialistModel } from "./providers";
 import { attachArtifacts, isPlaceholderCopy, normalizeBlock } from "./schema";
+import { normalizeBirthday, normalizeInstitution, normalizeInterests } from "./profile";
 import { insertProse, minutesForSections, normalizeLesson, sectionBounds, sectionCount } from "./sections";
 import { sandboxDocument } from "./widget";
 import type { Block } from "./types";
@@ -254,6 +255,15 @@ test("a requested subsection is inserted after the highlighted block", () => {
   assert.equal(next?.[0]?.blocks[1]?.type, "prose");
   if (next?.[0]?.blocks[1]?.type === "prose") assert.match(next[0].blocks[1].heading, /Critical path/);
   assert.equal(insertProse(sections, { sectionId: "missing", afterBlockId: highlighted, heading: "No", body: "Too short to count as a paragraph for the reader." }), null);
+});
+
+test("signup profile fields stay private and bounded", () => {
+  assert.equal(normalizeInstitution("  University of Washington "), "University of Washington");
+  assert.equal(normalizeInstitution("A"), null);
+  assert.equal(normalizeBirthday("2004-02-29"), "2004-02-29");
+  assert.equal(normalizeBirthday("2003-02-29"), null);
+  assert.equal(normalizeBirthday("2099-01-01"), null);
+  assert.deepEqual(normalizeInterests([" Calculus ", "calculus", "a", "Physics"]), ["Calculus", "Physics"]);
 });
 
 test("progress percent rounds", () => {

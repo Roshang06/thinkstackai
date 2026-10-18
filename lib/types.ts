@@ -150,13 +150,29 @@ export type ChatMessage = {
   createdAt: string;
 };
 
+export type Role = "student" | "instructor";
+
 export type Account = {
   id: string;
   email: string;
   name: string;
   passwordHash: string | null;
   googleSub: string | null;
+  role: Role;
+  institution: string;
+  interests: string[];
+  birthday: string;
   createdAt: string;
+};
+
+export type Profile = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  institution: string;
+  interests: string[];
+  birthday: string;
 };
 
 export type LessonDraftInput = {

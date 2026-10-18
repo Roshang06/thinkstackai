@@ -1,8 +1,9 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import type { Profile } from "@/lib/types";
 
-export type SessionUser = { id: string; name: string; email: string };
+export type SessionUser = Profile;
 
 type UserContextValue = {
   user: SessionUser | null;

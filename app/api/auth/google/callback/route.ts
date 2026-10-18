@@ -54,6 +54,10 @@ export async function GET(request: Request) {
         name: normalizeName(profile.name ?? "") ?? email.split("@")[0].slice(0, 40),
         passwordHash: null,
         googleSub: profile.sub,
+        role: "student",
+        institution: "",
+        interests: [],
+        birthday: "",
       });
     }
   }
