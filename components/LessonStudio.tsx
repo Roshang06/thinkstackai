@@ -353,7 +353,7 @@ export function LessonStudio() {
   const drafting = lesson.stage === "drafting";
 
   return (
-    <div className="w-full">
+    <div className={tutorOpen || editorOpen ? "w-full lg:pr-[28rem]" : "w-full"}>
       <div className="sticky top-0 z-10 border-b border-line bg-background/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-5 py-3">
           <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto">

@@ -473,9 +473,11 @@ export async function buildWidget(input: { topic: string; level: string; title: 
     timeoutMs: 22_000,
     system: [
       "Call return_widget once. Do not reply with prose.",
-      "html is one short page: inline CSS, a few lines of JavaScript, no libraries, no network, no iframes.",
-      "One control the learner can move or click, and a visible way to tell whether they succeeded.",
-      "Stay under 80 lines.",
+      "html is one short page: inline CSS, a few lines of JavaScript, no libraries, no network, no iframes, no quiz.",
+      "The page is shown in a 640 by 420 pixel frame. Everything, including the control, must fit without scrolling.",
+      "Canvas y grows downward. Draw a height y as groundY minus y, or the picture will be upside down.",
+      "One control the learner can move or click, and a visible readout of what changed.",
+      "Use a white background, ink #1d1915, and accent #0f6b62. Stay under 80 lines.",
     ].join(" "),
     prompt: `Topic: ${input.topic}\nLevel: ${input.level}\nSection: ${input.title}\nBrief: ${input.brief}`,
   });

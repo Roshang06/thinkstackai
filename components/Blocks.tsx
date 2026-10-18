@@ -230,9 +230,7 @@ function GraphView({ block, canEdit, onChange, onComplete }: BlockProps & { bloc
           onChange={(event) => onChange({ ...block, expression: event.target.value })}
           className="mb-3 w-full border-b border-line bg-transparent font-mono text-sm outline-none focus:border-accent"
         />
-      ) : (
-        <p className="mb-3 font-mono text-sm text-muted">{block.expression}</p>
-      )}
+      ) : null}
       <div ref={plotRef} className="overflow-hidden rounded-md border border-line bg-paper" />
       {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
     </div>
@@ -413,7 +411,8 @@ function WidgetView({ block, onComplete }: BlockProps & { block: WidgetBlock }) 
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
         srcDoc={block.html}
-        className="h-[28rem] w-full border border-line bg-white"
+        scrolling="no"
+        className="h-[28rem] w-full overflow-hidden border border-line bg-white"
       />
     </div>
   );
