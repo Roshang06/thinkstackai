@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { equation, newId, prose, quiz } from "./blocks";
 import { runDocumentProviders, runSpecialist } from "./providers";
-import { isDisplayMath, tidySectionParts } from "./markup";
+import { isDisplayMath, repairLessonText, tidySectionParts } from "./markup";
 import { insertProse, minutesForSections, proseDepth, sectionBounds } from "./sections";
 import type { Block, Lesson, LessonSection, WidgetBlock } from "./types";
 import { sandboxDocument, widgetFallback } from "./widget";
@@ -35,7 +35,12 @@ export type LessonOutline = {
 };
 
 function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+  if (typeof value !== "string") return "";
+  return value
+    .split(/(```[\s\S]*?```)/g)
+    .map((part, index) => (part.startsWith("```") && part.endsWith("```") && index % 2 === 1 ? part : repairLessonText(part)))
+    .join("")
+    .trim();
 }
 
 function words(value: string): number {
@@ -180,8 +185,9 @@ export async function writeSection(input: {
       `This is only the section “${input.section.title}” of a longer lesson. Do not summarize the other sections.`,
       `Write ${depth.parts} parts. Each body is about ${depth.words} words, in several paragraphs. The section title is already visible, so leave heading empty unless a later part starts a genuinely new subtopic.`,
       "Never repeat a heading, and never use the section title as a heading. If you need a subheading inside a paragraph, write it as <h2>Subtopic</h2> on its own line. Use <h1> only for a title that is not already the section title.",
-      "Wrap a word in **double asterisks** when it should be bold.",
-      "A variable or short formula stays inside the sentence as $V$. Use $$...$$ only for a long formula that needs its own line, such as a fraction or an integral. Leave equationLatex empty unless you could not place the formula in the text.",
+      "Wrap a word in **double asterisks** when it should be bold. A short name from a program goes in single backticks, like `scores`.",
+      "A multi-line code example is a fenced block: a line of three backticks and the language, then the code, then a line of three backticks. Keep a string's quotation marks inside that block. Do not put the fence in the middle of a sentence.",
+      "A variable or short formula stays inside the sentence as $V$. Write a fraction as $\\\\frac{a}{b}$. Use $$...$$ only for a long formula that needs its own line. Leave equationLatex empty unless you could not place the formula in the text.",
       "checkPrompt is one 4-choice quiz about this section. answerIndex is 0, 1, 2, or 3.",
       input.section.interaction
         ? "A specialist is building a playable interaction from a separate brief. Teach the idea, and do not describe the game's controls."

@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { displayProse } from "@/lib/markup";
-import { BlockView } from "./Blocks";
+import { BlockView, FormattedLine } from "./Blocks";
 import { readSse } from "./read-sse";
 import { ProgressBar } from "./ProgressBar";
 import { jsonHeaders, useUser } from "./user";
@@ -372,18 +372,18 @@ export function LessonStudio() {
           </div>
         ) : null}
 
-        <p className="text-sm text-muted">{lesson.summary}</p>
-        <h1 className="mt-2 font-display text-5xl tracking-tight">{lesson.title}</h1>
+        <p className="text-sm text-muted"><FormattedLine text={lesson.summary} /></p>
+        <h1 className="mt-2 font-display text-5xl tracking-tight"><FormattedLine text={lesson.title} /></h1>
         {section ? (
           <section className="mt-8">
             {section.title === lesson.title ? null : (
               <>
                 <p className="text-sm tracking-wide text-muted uppercase">Section {sectionIndex + 1}</p>
-                <h2 className="mt-1 font-display text-4xl">{section.title}</h2>
+                <h2 className="mt-1 font-display text-4xl"><FormattedLine text={section.title} /></h2>
               </>
             )}
             {section.blocks.length === 0 ? (
-              <p className="mt-6 max-w-2xl text-lg text-muted">{section.objective || "This section is next."}</p>
+              <p className="mt-6 max-w-2xl text-lg text-muted"><FormattedLine text={section.objective || "This section is next."} /></p>
             ) : (
               section.blocks.map((block, index) => {
                 const previous = section.blocks[index - 1];
@@ -457,7 +457,7 @@ export function LessonStudio() {
             {messages.length === 0 ? <li className="text-sm text-muted">Ask for a change, or ask where something went.</li> : null}
             {messages.map((message) => (
               <li key={message.id} className={`max-w-[90%] rounded-2xl px-3 py-2 text-sm leading-6 ${message.role === "user" ? "ml-auto bg-accent text-paper" : "bg-background"}`}>
-                {message.text}
+                <FormattedLine text={message.text} />
               </li>
             ))}
           </ol>

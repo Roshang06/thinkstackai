@@ -7,7 +7,7 @@ import { generationErrorMessage } from "./gemini";
 import { backboardModels, geminiModelNames, providerLabels, specialistModel } from "./providers";
 import { attachArtifacts, isPlaceholderCopy, normalizeBlock } from "./schema";
 import { normalizeBirthday, normalizeInstitution, normalizeInterests } from "./profile";
-import { isDisplayMath, parseMarkup, tidySectionParts } from "./markup";
+import { isDisplayMath, parseInline, parseMarkup, tidySectionParts, type Inline } from "./markup";
 import { insertProse, minutesForSections, normalizeLesson, sectionBounds, sectionCount } from "./sections";
 import { sandboxDocument } from "./widget";
 import type { Block } from "./types";
@@ -281,6 +281,72 @@ test("short math stays inline and repeated headings are dropped", () => {
   assert.equal(parts[1]?.heading, "");
   assert.equal(parts[1]?.body.startsWith("<h2>"), false);
   assert.equal(parts[2]?.heading, "Power");
+});
+
+function plainText(nodes: Inline[]): string {
+  return nodes
+    .map((node) => {
+      if (node.type === "text") return node.text;
+      if (node.type === "bold" || node.type === "italic") return plainText(node.children);
+      return "";
+    })
+    .join("");
+}
+
+test("lesson markers render as bold, code, and math", () => {
+  const bold = parseInline("**current**");
+  assert.equal(bold[0]?.type, "bold");
+  if (bold[0]?.type === "bold") assert.equal(plainText(bold[0].children), "current");
+
+  const code = parseInline("`score1` and '''name'''");
+  assert.equal(code[0]?.type, "code");
+  assert.equal(code[2]?.type, "code");
+  if (code[0]?.type === "code") assert.equal(code[0].text, "score1");
+  if (code[2]?.type === "code") assert.equal(code[2].text, "name");
+
+  const nested = parseInline("**$V$**");
+  assert.equal(nested[0]?.type, "bold");
+  if (nested[0]?.type === "bold") assert.equal(nested[0].children[0]?.type, "math");
+  assert.equal(plainText(nested).includes("*"), false);
+
+  const sentence = parseMarkup("Ohm's Law: $V = IR$, where $V$ is voltage, in **series** and *parallel*, as `R` or '''ohm'''.");
+  assert.equal(sentence[0]?.type, "paragraph");
+  if (sentence[0]?.type === "paragraph") {
+    const visible = plainText(sentence[0].children);
+    assert.equal(visible.includes("*"), false);
+    assert.equal(visible.includes("$"), false);
+    assert.equal(visible.includes("'''"), false);
+    assert.equal(visible.includes("`"), false);
+    assert.equal(sentence[0].children.some((child) => child.type === "math" && child.latex === "V = IR"), true);
+    assert.equal(sentence[0].children.some((child) => child.type === "italic"), true);
+    assert.equal(sentence[0].children.some((child) => child.type === "code"), true);
+  }
+
+  const bullet = parseMarkup("* current flows from high to low");
+  if (bullet[0]?.type === "paragraph") assert.equal(plainText(bullet[0].children).startsWith("•"), true);
+});
+
+test("fenced code stays code and broken latex commands are restored", () => {
+  const blocks = parseMarkup("Colors:\n\n```java\nString[] colors = {\"red\", \"green\", \"blue\"};\n```\n\nDone.\n\n```\njavac ArrayPractice.java\njava ArrayPractice\n```");
+  const code = blocks.filter((block) => block.type === "code");
+  assert.equal(code.length, 2);
+  if (code[0]?.type === "code") {
+    assert.equal(code[0].language, "java");
+    assert.equal(code[0].text, 'String[] colors = {"red", "green", "blue"};');
+  }
+  if (code[1]?.type === "code") assert.equal(code[1].text.includes("javac ArrayPractice.java"), true);
+  const prose = blocks.filter((block) => block.type === "paragraph");
+  assert.equal(prose.every((block) => block.type === "paragraph" && plainText(block.children).includes("`") === false), true);
+  assert.equal(prose.every((block) => block.type === "paragraph" && plainText(block.children).includes('"') === false), true);
+
+  const math = parseMarkup("Limit $f'(a) = \u0009ext{lim}_{h \u0009o 0} \u000crac{f(a+h)-f(a)}{h}$.");
+  const formula = math.find((block) => block.type === "math");
+  assert.equal(formula?.type, "math");
+  if (formula?.type === "math") assert.equal(formula.latex, "f'(a) = \\text{lim}_{h \\to 0} \\frac{f(a+h)-f(a)}{h}");
+
+  const repeated = tidySectionParts([{ heading: "", body: "Ohm's Law\n\nCurrent depends on voltage." }], "Ohm's Law");
+  assert.equal(repeated[0]?.body.startsWith("Ohm's Law"), false);
+  assert.match(repeated[0]?.body ?? "", /Current depends/);
 });
 
 test("signup profile fields stay private and bounded", () => {

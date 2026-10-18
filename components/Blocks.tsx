@@ -2,7 +2,7 @@
 
 import katex from "katex";
 import { useEffect, useRef, useState } from "react";
-import { parseMarkup, type Inline } from "@/lib/markup";
+import { parseInline, parseMarkup, repairLessonText, type Inline } from "@/lib/markup";
 import { CODE_FRAME } from "./code-frame";
 import { useMarkVisible } from "./useMarkVisible";
 import type {
@@ -42,19 +42,29 @@ const LABELS: Record<Block["type"], string> = {
 };
 
 function mathHtml(latex: string, display: boolean): string {
-  return katex.renderToString(latex, { throwOnError: false, displayMode: display });
+  return katex.renderToString(repairLessonText(latex), { throwOnError: false, displayMode: display });
 }
 
 function InlineText({ children }: { children: Inline[] }) {
   return (
     <>
       {children.map((child, index) => {
-        if (child.type === "bold") return <strong key={index}>{child.text}</strong>;
+        if (child.type === "bold") return <strong key={index}><InlineText children={child.children} /></strong>;
+        if (child.type === "italic") return <em key={index}><InlineText children={child.children} /></em>;
+        if (child.type === "code") return <code key={index} className="rounded bg-background px-1 font-mono text-[0.92em]">{child.text}</code>;
         if (child.type === "math") return <span key={index} dangerouslySetInnerHTML={{ __html: mathHtml(child.latex, false) }} />;
         return <span key={index}>{child.text}</span>;
       })}
     </>
   );
+}
+
+function RichInline({ text }: { text: string }) {
+  return <InlineText children={parseInline(text)} />;
+}
+
+export function FormattedLine({ text }: { text: string }) {
+  return <RichInline text={text} />;
 }
 
 function RichText({ text }: { text: string }) {
@@ -64,10 +74,17 @@ function RichText({ text }: { text: string }) {
       {blocks.map((block, index) => {
         if (block.type === "heading") {
           const Tag = block.level === 1 ? "h2" : "h3";
-          return <Tag key={index} className="font-display text-3xl tracking-tight">{block.text}</Tag>;
+          return <Tag key={index} className="font-display text-3xl tracking-tight"><RichInline text={block.text} /></Tag>;
         }
         if (block.type === "math") {
           return <div key={index} className="overflow-x-auto py-2" dangerouslySetInnerHTML={{ __html: mathHtml(block.latex, true) }} />;
+        }
+        if (block.type === "code") {
+          return (
+            <pre key={index} className="overflow-x-auto rounded-md border border-line bg-paper p-3 font-mono text-sm leading-6">
+              <code>{block.text}</code>
+            </pre>
+          );
         }
         return (
           <p key={index}>
@@ -132,29 +149,37 @@ export function BlockView(props: BlockProps) {
 
 function ProseView({ block, canEdit, onChange, onComplete }: BlockProps & { block: ProseBlock }) {
   const ref = useMarkVisible(onComplete, true);
+  const [editing, setEditing] = useState(false);
   return (
     <div ref={ref}>
-      {canEdit ? (
+      {editing ? (
         <input
           value={block.heading}
           onChange={(event) => onChange({ ...block, heading: event.target.value })}
           className="mb-3 w-full bg-transparent font-display text-3xl text-foreground outline-none"
         />
       ) : block.heading.trim() ? (
-        <h2 className="mb-3 font-display text-3xl">{block.heading}</h2>
+        <h2 className="mb-3 font-display text-3xl">
+          <RichInline text={block.heading} />
+        </h2>
       ) : null}
-      {canEdit ? <AutoText value={block.body} onChange={(body) => onChange({ ...block, body })} /> : <RichText text={block.body} />}
+      {editing ? <AutoText value={block.body} onChange={(body) => onChange({ ...block, body })} /> : <RichText text={block.body} />}
+      {canEdit ? (
+        <button type="button" onClick={() => setEditing((current) => !current)} className="mt-2 text-xs text-muted">
+          {editing ? "Done editing" : "Edit text"}
+        </button>
+      ) : null}
     </div>
   );
 }
 
 function EquationView({ block, onComplete }: BlockProps & { block: EquationBlock }) {
   const ref = useMarkVisible(onComplete, true);
-  const html = katex.renderToString(block.latex, { throwOnError: false, displayMode: true });
+  const html = mathHtml(block.latex, true);
   return (
     <div ref={ref}>
       <div className="overflow-x-auto py-2" dangerouslySetInnerHTML={{ __html: html }} />
-      {block.caption ? <p className="mt-3 text-muted">{block.caption}</p> : null}
+      {block.caption ? <p className="mt-3 text-muted"><RichInline text={block.caption} /></p> : null}
     </div>
   );
 }
@@ -196,7 +221,7 @@ function GraphView({ block, canEdit, onChange, onComplete }: BlockProps & { bloc
 
   return (
     <div ref={ref}>
-      <h2 className="mb-3 font-display text-3xl">{block.title}</h2>
+      <h2 className="mb-3 font-display text-3xl"><RichInline text={block.title} /></h2>
       {canEdit ? (
         <input
           value={block.expression}
@@ -218,7 +243,7 @@ function QuizView({ block, onComplete }: BlockProps & { block: QuizBlock }) {
   const [solved, setSolved] = useState(false);
   return (
     <div className={solved ? "rounded-2xl bg-accent-soft/60 p-4" : ""} onClick={(event) => event.stopPropagation()}>
-      <h2 className="mb-4 font-display text-3xl">{block.prompt}</h2>
+      <h2 className="mb-4 font-display text-3xl"><RichInline text={block.prompt} /></h2>
       <div className="grid gap-2">
         {block.choices.map((option, index) => {
           const correct = index === block.answerIndex;
@@ -238,12 +263,12 @@ function QuizView({ block, onComplete }: BlockProps & { block: QuizBlock }) {
                 solved && correct ? "border-accent bg-accent-soft" : missed ? "border-danger bg-[#f8e8e6] text-danger" : "border-line hover:border-foreground"
               }`}
             >
-              {option}
+              <RichInline text={option} />
             </button>
           );
         })}
       </div>
-      {solved ? <p className="mt-4 text-muted">{block.explanation}</p> : null}
+      {solved ? <div className="mt-4 text-muted"><RichText text={block.explanation} /></div> : null}
     </div>
   );
 }
@@ -262,7 +287,7 @@ function ShortAnswerView({ block, onComplete }: BlockProps & { block: ShortAnswe
 
   return (
     <div onClick={(event) => event.stopPropagation()}>
-      <h2 className="mb-4 font-display text-3xl">{block.prompt}</h2>
+      <h2 className="mb-4 font-display text-3xl"><RichInline text={block.prompt} /></h2>
       <form
         className="flex gap-2"
         onSubmit={(event) => {
@@ -279,7 +304,7 @@ function ShortAnswerView({ block, onComplete }: BlockProps & { block: ShortAnswe
           Check
         </button>
       </form>
-      {result === "correct" ? <p className="mt-4 text-accent">{block.explanation}</p> : null}
+      {result === "correct" ? <div className="mt-4 text-accent"><RichText text={block.explanation} /></div> : null}
       {result === "wrong" ? <p className="mt-4 text-danger">Not quite. Check the wording and try again.</p> : null}
     </div>
   );
@@ -305,13 +330,13 @@ function FlashcardsView({ block, onComplete }: BlockProps & { block: FlashcardsB
 
   return (
     <div>
-      <h2 className="mb-4 font-display text-3xl">{block.title}</h2>
+      <h2 className="mb-4 font-display text-3xl"><RichInline text={block.title} /></h2>
       <button
         type="button"
         onClick={() => setFlipped((value) => !value)}
         className="flex min-h-40 w-full items-center justify-center rounded-md border border-line bg-paper px-6 py-8 text-center text-xl"
       >
-        {flipped ? card.back : card.front}
+        <RichInline text={flipped ? card.back : card.front} />
       </button>
       <div className="mt-3 flex items-center justify-between text-sm text-muted">
         <span>
@@ -350,7 +375,7 @@ function CodeView({ block, canEdit, onChange, onComplete }: BlockProps & { block
   return (
     <div className="relative">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="font-display text-3xl">{block.title}</h2>
+        <h2 className="font-display text-3xl"><RichInline text={block.title} /></h2>
         <span className="text-xs tracking-wide text-muted uppercase">{block.language}</span>
       </div>
       <textarea
@@ -381,7 +406,7 @@ function WidgetView({ block, onComplete }: BlockProps & { block: WidgetBlock }) 
   }
   return (
     <div ref={ref}>
-      <h2 className="mb-3 font-display text-3xl">{block.title}</h2>
+      <h2 className="mb-3 font-display text-3xl"><RichInline text={block.title} /></h2>
       <iframe
         title={block.title}
         sandbox="allow-scripts"
@@ -463,8 +488,8 @@ function SimulationView({ block, onComplete }: BlockProps & { block: SimulationB
 
   return (
     <div>
-      <h2 className="mb-2 font-display text-3xl">{block.title}</h2>
-      {block.note ? <p className="mb-4 text-muted">{block.note}</p> : null}
+      <h2 className="mb-2 font-display text-3xl"><RichInline text={block.title} /></h2>
+      {block.note ? <p className="mb-4 text-muted"><RichInline text={block.note} /></p> : null}
       <canvas ref={canvas} width={720} height={240} className="w-full rounded-md border border-line" />
       {block.kind === "wave" ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
